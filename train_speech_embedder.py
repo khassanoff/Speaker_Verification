@@ -29,23 +29,43 @@ def train(model_path):
     train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
                               num_workers=hp.train.num_workers, drop_last=True)
  
+    #load model
     if hp.model.type.lower() == 'tresnet34':
         embedder_net = Resnet34_VLAD().to(device)
     elif hp.model.type.lower() == 'rnn':
         embedder_net = SpeechEmbedder().to(device)
-
     print(embedder_net)
+
     if hp.train.restore:
+        #resume training
         embedder_net.load_state_dict(torch.load(model_path))
+
     ge2e_loss = GE2ELoss(device)
     #Both net and loss have trainable parameters
-    optimizer = torch.optim.SGD([
+    if hp.train.optim.lower() == 'sgd':
+        optimizer = torch.optim.SGD([
                     {'params': embedder_net.parameters()},
                     {'params': ge2e_loss.parameters()}
                 ], lr=hp.train.lr)
+    elif hp.train.optim.lower() == 'adam':
+        optimizer = torch.optim.Adam([
+                    {'params': embedder_net.parameters()},
+                    {'params': ge2e_loss.parameters()}
+                ], lr=hp.train.lr)
+    elif hp.train.optim.lower() == 'adadelta':
+        optimizer = torch.optim.Adadelta([
+                    {'params': embedder_net.parameters()},
+                    {'params': ge2e_loss.parameters()}
+                ], lr=hp.train.lr)
+    print(optimizer)
  
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True,
+                    factor=0.9, patience=hp.train.patience, threshold=0.001)
+    print(scheduler)
+
     os.makedirs(hp.train.checkpoint_dir, exist_ok=True)
 
+    #start training
     embedder_net.train()
     iteration = 0
     for e in range(hp.train.epochs):
@@ -76,7 +96,8 @@ def train(model_path):
 
             total_loss = total_loss + loss
             iteration += 1
-            if (batch_id + 1) % hp.train.log_interval == 0:
+            if (batch_id + 1) % hp.train.log_interval == 0 or \
+               (batch_id + 1) % (len(train_dataset)//hp.train.N) == 0:
                 mesg = "{0}\tEpoch:{1}[{2}/{3}], Iteration:{4}\tLoss:{5:.4f}\tTLoss:{6:.4f}\t\n".format(
                         time.ctime(), e+1, batch_id+1, len(train_dataset)//hp.train.N, iteration,
                         loss, total_loss / (batch_id + 1))
@@ -87,6 +108,10 @@ def train(model_path):
                                 + "_feat" + hp.data.feat_type \
                                 + "_lr" + str(hp.train.lr), 'a') as f:
                         f.write(mesg)
+
+                if (batch_id + 1) % (len(train_dataset)//hp.train.N) == 0:
+                    scheduler.step(total_loss)
+                    print("learning rate: {0:.6f}".format(optimizer.param_groups[1]['lr']))
 
         if hp.train.checkpoint_dir is not None and (e + 1) % hp.train.checkpoint_interval == 0:
             embedder_net.eval().cpu()
