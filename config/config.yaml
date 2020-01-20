@@ -1,5 +1,6 @@
 training: !!bool "true"
-device: "7" #gpu id
+device: 0 #gpu id
+seed: 777
 ---
 data:
     train_path: './dataVoxCeleb1/Audio/dev/processed'
@@ -28,11 +29,10 @@ train:
     M : 10 #Number of utterances per speaker
     num_workers: 0 #number of workers for dataloader
     lr: 0.1
-    optim: 'Adam' #optimizer type: 'Adam', 'SGD', 'Adadelta'
+    optim: 'Adadelta' #optimizer type: 'Adam', 'SGD', 'Adadelta'
     epochs: 1000 #Max training epoch 
-    patience: 2
+    patience: 10 
     log_interval: 100 #Iterations before printing progress
-    log_file: './speech_id_checkpoint/Stats'
     checkpoint_interval: 50 #Save model after x speaker epochs
     checkpoint_dir: './speech_id_checkpoint'
     restore: !!bool "false" #Resume training from previous model path
