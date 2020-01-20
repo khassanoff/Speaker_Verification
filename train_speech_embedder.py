@@ -20,11 +20,25 @@ from data_load import VoxCeleb
 #from speech_embedder_net import SpeechEmbedder, GE2ELoss, get_centroids, get_cossim
 from speech_embedder_net import Resnet34_VLAD, SpeechEmbedder, GE2ELoss, get_centroids, get_cossim
 
+torch.manual_seed(hp.seed)
+np.random.seed(hp.seed)
+random.seed(hp.seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
 
 def train(model_path):
-    device = torch.device("cuda:"+hp.device if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:"+str(hp.device) if torch.cuda.is_available() else "cpu")
     #device = torch.device(hp.device)
  
+    #checkpoint and log dir
+    os.makedirs(hp.train.checkpoint_dir, exist_ok=True)
+    log_file = "model" + hp.model.type + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
+                    + "_feat" + hp.data.feat_type + "_lr" + str(hp.train.lr) \
+                    + "_optim" + hp.train.optim + ".log"
+    log_file_path = os.path.join(hp.train.checkpoint_dir, log_file)
+
+    #dataset
     train_dataset = VoxCeleb()
     train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
                               num_workers=hp.train.num_workers, drop_last=True)
@@ -42,6 +56,7 @@ def train(model_path):
 
     ge2e_loss = GE2ELoss(device)
     #Both net and loss have trainable parameters
+
     if hp.train.optim.lower() == 'sgd':
         optimizer = torch.optim.SGD([
                     {'params': embedder_net.parameters()},
@@ -63,7 +78,6 @@ def train(model_path):
                     factor=0.9, patience=hp.train.patience, threshold=0.001)
     print(scheduler)
 
-    os.makedirs(hp.train.checkpoint_dir, exist_ok=True)
 
     #start training
     embedder_net.train()
@@ -102,43 +116,37 @@ def train(model_path):
                         time.ctime(), e+1, batch_id+1, len(train_dataset)//hp.train.N, iteration,
                         loss, total_loss / (batch_id + 1))
                 print(mesg)
-                if hp.train.log_file is not None:
-                    with open(hp.train.log_file + "_model" + hp.model.type \
-                                + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
-                                + "_feat" + hp.data.feat_type \
-                                + "_lr" + str(hp.train.lr), 'a') as f:
+                with open(log_file_path, 'a') as f:
                         f.write(mesg)
 
                 if (batch_id + 1) % (len(train_dataset)//hp.train.N) == 0:
                     scheduler.step(total_loss)
-                    print("learning rate: {0:.6f}".format(optimizer.param_groups[1]['lr']))
+                    print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
 
         if hp.train.checkpoint_dir is not None and (e + 1) % hp.train.checkpoint_interval == 0:
             embedder_net.eval().cpu()
             ckpt_model_filename = "ckpt_epoch" + str(e+1) + "_batchID" + str(batch_id+1) \
-                                  + "_model" + hp.model.type \
-                                  + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
-                                  + "_feat" + hp.data.feat_type \
-                                  + "_lr" + str(hp.train.lr) + ".pth"
+                                    + "_model" + hp.model.type \
+                                    + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
+                                    + "_feat" + hp.data.feat_type \
+                                    + "_lr" + str(hp.train.lr) + "_optim" + hp.train.optim + ".pth"
             ckpt_model_path = os.path.join(hp.train.checkpoint_dir, ckpt_model_filename)
             torch.save(embedder_net.state_dict(), ckpt_model_path)
+
             eer, thresh = testVoxCeleb(ckpt_model_path)
             mesg = ("\nEER : %0.2f (thres:%0.2f)\n"%(eer, thresh))
-            if hp.train.log_file is not None:
-                with open(hp.train.log_file + "_model" + hp.model.type \
-                            + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
-                            + "_feat" + hp.data.feat_type \
-                            + "_lr" + str(hp.train.lr), 'a') as f:
-                    f.write(mesg)
+            mesg += ("learning rate: {0:.8f}\n".format(optimizer.param_groups[1]['lr']))
+            with open(log_file_path, 'a') as f:
+                f.write(mesg)
             embedder_net.to(device).train()
 
     #save model
     embedder_net.eval().cpu()
     save_model_filename = "final_epoch" + str(e+1) + "_batchID" + str(batch_id+1) \
-                          + "_model" + hp.model.type \
-                          + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
-                          + "_feat" + hp.data.feat_type \
-                          + "_lr" + str(hp.train.lr) + ".pth"
+                            + "_model" + hp.model.type \
+                            + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
+                            + "_feat" + hp.data.feat_type \
+                            + "_lr" + str(hp.train.lr) + "_optim" + hp.train.optim + ".pth"
 
     save_model_path = os.path.join(hp.train.checkpoint_dir, save_model_filename)
     torch.save(embedder_net.state_dict(), save_model_path)
@@ -148,7 +156,7 @@ def train(model_path):
 
 
 def testVoxCeleb(model_path):
-    device = torch.device("cuda:"+hp.device if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:"+str(hp.device) if torch.cuda.is_available() else "cpu")
 
     print('==> calculating test({}) data lists...'.format(os.path.join(hp.data.test_path,
                                                                        hp.data.feat_type)))
