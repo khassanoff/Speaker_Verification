@@ -137,7 +137,8 @@ def train(model_path):
                                     + "_model" + hp.model.type \
                                     + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                                     + "_feat" + hp.data.feat_type \
-                                    + "_lr" + str(hp.train.lr) + "_optim" + hp.train.optim + ".pth"
+                                    + "_lr" + str(hp.train.lr) + "_optim" + hp.train.optim \
+                                    + "_loss" + hp.train.loss + ".pth"
             ckpt_model_path = os.path.join(hp.train.checkpoint_dir, ckpt_model_filename)
             torch.save(embedder_net.state_dict(), ckpt_model_path)
 
@@ -154,7 +155,8 @@ def train(model_path):
                             + "_model" + hp.model.type \
                             + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                             + "_feat" + hp.data.feat_type \
-                            + "_lr" + str(hp.train.lr) + "_optim" + hp.train.optim + ".pth"
+                            + "_lr" + str(hp.train.lr) + "_optim" + hp.train.optim \
+                            + "_loss" + hp.train.loss + ".pth"
 
     save_model_path = os.path.join(hp.train.checkpoint_dir, save_model_filename)
     torch.save(embedder_net.state_dict(), save_model_path)
