@@ -9,7 +9,7 @@ import glob
 import numpy as np
 import os
 import random
-import pdb
+import pdb, re
 from random import shuffle
 import torch
 from torch.utils.data import Dataset
@@ -34,11 +34,14 @@ class VoxCeleb(Dataset):
 
         np_file_list = os.listdir(self.path)
 
-        if self.shuffle:
+        #if self.shuffle:
             # select random speaker
-            selected_file = random.sample(np_file_list, 1)[0]
-        else:
-            selected_file = np_file_list[idx]
+        #    selected_file = random.sample(np_file_list, 1)[0]
+        #else:
+        #    selected_file = np_file_list[idx]
+        selected_file = np_file_list[idx]
+        spk_id = int(re.findall("(\d+)", selected_file)[0])
+
         # load utterance spectrogram of selected speaker
         utters = np.load(os.path.join(self.path, selected_file))
         if self.shuffle:
@@ -52,4 +55,4 @@ class VoxCeleb(Dataset):
         #utterance = utterance[:,:,:160]               # TODO implement variable length batch size
         # transpose [batch, frames, n_mels]
         utterance = torch.tensor(np.transpose(utterance, axes=(0,2,1)))
-        return utterance
+        return utterance, spk_id

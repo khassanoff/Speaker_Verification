@@ -18,7 +18,8 @@ from utils import calculate_eer
 from hparam import hparam as hp
 from data_load import VoxCeleb
 #from speech_embedder_net import SpeechEmbedder, GE2ELoss, get_centroids, get_cossim
-from speech_embedder_net import Resnet34_VLAD, SpeechEmbedder, GE2ELoss, get_centroids, get_cossim
+from speech_embedder_net import Resnet34_VLAD, SpeechEmbedder, GE2ELoss, SILoss, get_centroids, \
+get_cossim, HybridLoss
 
 torch.manual_seed(hp.seed)
 np.random.seed(hp.seed)
@@ -35,7 +36,7 @@ def train(model_path):
     os.makedirs(hp.train.checkpoint_dir, exist_ok=True)
     log_file = "model" + hp.model.type + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                     + "_feat" + hp.data.feat_type + "_lr" + str(hp.train.lr) \
-                    + "_optim" + hp.train.optim + ".log"
+                    + "_optim" + hp.train.optim + "_loss" + hp.train.loss +".log"
     log_file_path = os.path.join(hp.train.checkpoint_dir, log_file)
 
     #dataset
@@ -54,28 +55,34 @@ def train(model_path):
         #resume training
         embedder_net.load_state_dict(torch.load(model_path))
 
-    ge2e_loss = GE2ELoss(device)
+    if hp.train.loss.lower() == 'ge2e':
+        loss_fn = GE2ELoss(device)
+    elif hp.train.loss.lower() == 'si':
+        loss_fn = SILoss(512, len(train_dataset)).to(device)
+    elif hp.train.loss.lower() == 'hybrid':
+        loss_fn = HybridLoss(512, len(train_dataset), device).to(device)
+
     #Both net and loss have trainable parameters
 
     if hp.train.optim.lower() == 'sgd':
         optimizer = torch.optim.SGD([
                     {'params': embedder_net.parameters()},
-                    {'params': ge2e_loss.parameters()}
+                    {'params': loss_fn.parameters()}
                 ], lr=hp.train.lr)
     elif hp.train.optim.lower() == 'adam':
         optimizer = torch.optim.Adam([
                     {'params': embedder_net.parameters()},
-                    {'params': ge2e_loss.parameters()}
+                    {'params': loss_fn.parameters()}
                 ], lr=hp.train.lr)
     elif hp.train.optim.lower() == 'adadelta':
         optimizer = torch.optim.Adadelta([
                     {'params': embedder_net.parameters()},
-                    {'params': ge2e_loss.parameters()}
+                    {'params': loss_fn.parameters()}
                 ], lr=hp.train.lr)
     print(optimizer)
  
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True,
-                    factor=0.9, patience=hp.train.patience, threshold=0.001)
+                    factor=0.9, patience=hp.train.patience, threshold=0.0001)
     print(scheduler)
 
 
@@ -84,28 +91,29 @@ def train(model_path):
     iteration = 0
     for e in range(hp.train.epochs):
         total_loss = 0
-        for batch_id, mel_db_batch in enumerate(train_loader):
+        for batch_id, (mel_db_batch, spk_id) in enumerate(train_loader):
             mel_db_batch = mel_db_batch.to(device)
+            spk_id = spk_id.to(device)
 
             mel_db_batch = torch.reshape(mel_db_batch, (hp.train.N*hp.train.M, mel_db_batch.size(2),
                                                         mel_db_batch.size(3)))
-            perm = random.sample(range(0, hp.train.N*hp.train.M), hp.train.N*hp.train.M)
-            unperm = list(perm)
-            for i,j in enumerate(perm):
-                unperm[j] = i
-            mel_db_batch = mel_db_batch[perm]
+            #perm = random.sample(range(0, hp.train.N*hp.train.M), hp.train.N*hp.train.M)
+            #unperm = list(perm)
+            #for i,j in enumerate(perm):
+            #    unperm[j] = i
+            #mel_db_batch = mel_db_batch[perm]
             #gradient accumulates
             optimizer.zero_grad()
 
             embeddings = embedder_net(mel_db_batch)
-            embeddings = embeddings[unperm]
+            #embeddings = embeddings[unperm]
             embeddings = torch.reshape(embeddings, (hp.train.N, hp.train.M, embeddings.size(1)))
 
             #get loss, call backward, step optimizer
-            loss = ge2e_loss(embeddings) #wants (Speaker, Utterances, embedding)
+            loss = loss_fn(embeddings, spk_id) #wants (Speaker, Utterances, embedding)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(embedder_net.parameters(), 3.0)
-            torch.nn.utils.clip_grad_norm_(ge2e_loss.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(loss_fn.parameters(), 1.0)
             optimizer.step()
 
             total_loss = total_loss + loss
@@ -168,7 +176,8 @@ def testVoxCeleb(model_path):
         embedder_net = SpeechEmbedder().to(device)
     embedder_net.load_state_dict(torch.load(model_path))
     embedder_net.eval()
-    print(embedder_net)
+    #print(embedder_net)
+    print("Model type: "+hp.model.type)
 
     print('==> reading data')
     triplets = np.load(os.path.join(hp.data.test_path, hp.data.feat_type, 'test_triplets.npy'),

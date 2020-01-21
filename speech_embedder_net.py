@@ -8,6 +8,8 @@ Created on Wed Sep  5 20:58:34 2018
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
 import pdb
 
 from hparam import hparam as hp
@@ -40,13 +42,37 @@ class GE2ELoss(nn.Module):
         self.b = nn.Parameter(torch.tensor(-5.0).to(device), requires_grad=True)
         self.device = device
 
-    def forward(self, embeddings):
+    def forward(self, embeddings, y=None):
         torch.clamp(self.w, 1e-6)
         centroids = get_centroids(embeddings)
         cossim = get_cossim(embeddings, centroids)
         sim_matrix = self.w*cossim.to(self.device) + self.b
         loss, _ = calc_loss(sim_matrix)
         return loss
+
+class SILoss(nn.Module):
+    def __init__(self, emb_size, num_of_spks):
+        super(SILoss, self).__init__()
+        self.linear = nn.Linear(emb_size, num_of_spks)
+
+    def forward(self, x, y):
+        y = y.repeat_interleave(hp.train.M)
+        x = torch.reshape(x, (hp.train.N*hp.train.M, x.size(2)))
+        x = self.linear(x)
+        loss = F.cross_entropy(x, y)
+        return loss
+
+class HybridLoss(nn.Module):
+    def __init__(self, emb_size, num_of_spks, device):
+        super(HybridLoss, self).__init__()
+        self.device = device
+        self.ge2eloss = GE2ELoss(device)
+        self.siloss = SILoss(emb_size, num_of_spks)
+
+    def forward(self, x, y):
+        l1 = self.ge2eloss(x).to(self.device)
+        l2 = self.siloss(x, y)
+        return l1 + l2
 
 
 input_dim = 1
@@ -190,6 +216,8 @@ class Resnet34_VLAD(nn.Module):
         # ============================
         #   Fully Connected Block 2
         # ============================   
-        x = self.dense(x) 
+        x = self.dense(x)
+        #unit vector normalization
+        x = x / torch.norm(x, dim=1).unsqueeze(1)
 
         return x

@@ -25,11 +25,12 @@ model:
     model_path: './speech_id_checkpoint/final_epoch_950_batch_id_302.model' 
 ---
 train:
-    N : 5 #Number of speakers in batch
-    M : 10 #Number of utterances per speaker
+    N : 4 #Number of speakers in batch
+    M : 8 #Number of utterances per speaker
     num_workers: 0 #number of workers for dataloader
-    lr: 0.1
+    lr: 0.01
     optim: 'Adadelta' #optimizer type: 'Adam', 'SGD', 'Adadelta'
+    loss: 'ge2e' #loss type: "si" (Speaker identification), 'ge2e' (generaliazed E2E loss), 'hybrid'
     epochs: 1000 #Max training epoch 
     patience: 10 
     log_interval: 100 #Iterations before printing progress
