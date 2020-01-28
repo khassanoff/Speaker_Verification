@@ -89,7 +89,7 @@ def conv_block(input_dim, filters, strides):
             nn.Conv2d(filters[0], filters[1], kernel_size=3, bias=False, padding=1),
             nn.BatchNorm2d(filters[1]),
             nn.ReLU(True),
-            nn.Conv2d(filters[1], filters[2], kernel_size=3, bias=False, padding=1),
+            nn.Conv2d(filters[1], filters[2], kernel_size=1, bias=False),
             nn.BatchNorm2d(filters[2])
             )
 
@@ -155,13 +155,13 @@ class Resnet34_VLAD(nn.Module):
         x1 = self.conv1(x)
         x1 = self.norm_layer(x1)
         x1 = self.relu(x1)
-        x1 = self.max_pool1(x1)
-        
+        x1 = self.max_pool1(x1) #?
+
         # ============================
         #            Block 2
-        # ============================             
+        # ============================
         x2 = self.relu(self.conv_block1(x1).add(self.shortcut1(x1)))
-        x2 = self.relu(self.identity_block1(x2).add(x2))  
+        x2 = self.relu(self.identity_block1(x2).add(x2))
         
         
         # ============================
@@ -190,27 +190,30 @@ class Resnet34_VLAD(nn.Module):
         # ============================
         #   Fully Connected Block 1
         # ============================   
-        x_fc = self.conv2(x5) # output (1, 512, 1, 16)
+        feat_broadcast = self.relu(self.conv2(x5)) # output (1, 512, 1, 16)
+        feat_broadcast = torch.transpose(feat_broadcast, 1, -1)
         
         # ============================
         #  Feature Aggregation (VLAD)
         # ============================
         
         x_centers = self.conv3(x5)
-        num_features = x.shape[1] #512
-        max_cluster_score = torch.max(x_centers, 1, keepdim=True).values
+        x_centers = torch.transpose(x_centers , 1, -1)
+
+        #num_features = x.shape[1] #512
+        max_cluster_score = torch.max(x_centers, -1, keepdim=True).values
         exp_cluster_score = torch.exp(x_centers - max_cluster_score)
-        A = exp_cluster_score / torch.sum(exp_cluster_score, 1, keepdim = True)
+        A = exp_cluster_score / torch.sum(exp_cluster_score, -1, keepdim = True)
+
         A = A.unsqueeze(-1)
-        feat_broadcast = x_fc  # feat_broadcast : bz x W x H x 1 x D
-        feat_broadcast = torch.transpose(feat_broadcast, 1, -1)
+    
+        #feat_broadcast = x_fc  # feat_broadcast : bz x W x H x 1 x D
         feat_broadcast = feat_broadcast.unsqueeze(-2)
     
         feat_res = feat_broadcast - self.cluster
-        A = torch.transpose(A, 1, 3)
         weighted_res = torch.mul(A, feat_res)
         cluster_res  = torch.sum(weighted_res, (1, 2))
-        cluster_l2 = nn.functional.normalize(cluster_res,dim=-1,p=2)
+        cluster_l2 = nn.functional.normalize(cluster_res,dim=-1, p=2)
         x = cluster_l2.view(-1, vlad_centers*512)
         
         # ============================
@@ -218,6 +221,6 @@ class Resnet34_VLAD(nn.Module):
         # ============================   
         x = self.dense(x)
         #unit vector normalization
-        x = x / torch.norm(x, dim=1).unsqueeze(1)
+        #x = x / torch.norm(x, dim=1).unsqueeze(1)
 
         return x

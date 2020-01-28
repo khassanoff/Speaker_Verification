@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 from utils import calculate_eer 
 
 from hparam import hparam as hp
-from data_load import VoxCeleb
+from data_load import VoxCeleb, VoxCeleb_utter
 #from speech_embedder_net import SpeechEmbedder, GE2ELoss, get_centroids, get_cossim
 from speech_embedder_net import Resnet34_VLAD, SpeechEmbedder, GE2ELoss, SILoss, get_centroids, \
 get_cossim, HybridLoss
@@ -36,13 +36,10 @@ def train(model_path):
     os.makedirs(hp.train.checkpoint_dir, exist_ok=True)
     log_file = "model" + hp.model.type + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                     + "_feat" + hp.data.feat_type + "_lr" + str(hp.train.lr) \
-                    + "_optim" + hp.train.optim + "_loss" + hp.train.loss +".log"
+                    + "_optim" + hp.train.optim + "_loss" + hp.train.loss \
+                    + "_wd" + str(hp.train.wd) + ".log"
     log_file_path = os.path.join(hp.train.checkpoint_dir, log_file)
 
-    #dataset
-    train_dataset = VoxCeleb()
-    train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
-                              num_workers=hp.train.num_workers, drop_last=True)
  
     #load model
     if hp.model.type.lower() == 'tresnet34':
@@ -56,10 +53,22 @@ def train(model_path):
         embedder_net.load_state_dict(torch.load(model_path))
 
     if hp.train.loss.lower() == 'ge2e':
+        #dataset
+        train_dataset = VoxCeleb()
+        train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
+                                  num_workers=hp.train.num_workers, drop_last=True)
         loss_fn = GE2ELoss(device)
     elif hp.train.loss.lower() == 'si':
-        loss_fn = SILoss(512, len(train_dataset)).to(device)
+        #dataset
+        train_dataset = VoxCeleb_utter()
+        train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
+                                  num_workers=hp.train.num_workers, drop_last=True)
+        loss_fn = SILoss(512, train_dataset.num_of_spk).to(device)
     elif hp.train.loss.lower() == 'hybrid':
+        #dataset
+        train_dataset = VoxCeleb()
+        train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
+                                  num_workers=hp.train.num_workers, drop_last=True)
         loss_fn = HybridLoss(512, len(train_dataset), device).to(device)
 
     #Both net and loss have trainable parameters
@@ -68,17 +77,17 @@ def train(model_path):
         optimizer = torch.optim.SGD([
                     {'params': embedder_net.parameters()},
                     {'params': loss_fn.parameters()}
-                ], lr=hp.train.lr)
+                ], lr=hp.train.lr, weight_decay=hp.train.wd)
     elif hp.train.optim.lower() == 'adam':
         optimizer = torch.optim.Adam([
                     {'params': embedder_net.parameters()},
                     {'params': loss_fn.parameters()}
-                ], lr=hp.train.lr)
+                ], lr=hp.train.lr, weight_decay=hp.train.wd)
     elif hp.train.optim.lower() == 'adadelta':
         optimizer = torch.optim.Adadelta([
                     {'params': embedder_net.parameters()},
                     {'params': loss_fn.parameters()}
-                ], lr=hp.train.lr)
+                ], lr=hp.train.lr, weight_decay=hp.train.wd)
     print(optimizer)
  
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True,
@@ -112,8 +121,8 @@ def train(model_path):
             #get loss, call backward, step optimizer
             loss = loss_fn(embeddings, spk_id) #wants (Speaker, Utterances, embedding)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(embedder_net.parameters(), 3.0)
-            torch.nn.utils.clip_grad_norm_(loss_fn.parameters(), 1.0)
+            #torch.nn.utils.clip_grad_norm_(embedder_net.parameters(), 3.0)
+            #torch.nn.utils.clip_grad_norm_(loss_fn.parameters(), 1.0)
             optimizer.step()
 
             total_loss = total_loss + loss
@@ -138,7 +147,8 @@ def train(model_path):
                                     + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                                     + "_feat" + hp.data.feat_type \
                                     + "_lr" + str(hp.train.lr) + "_optim" + hp.train.optim \
-                                    + "_loss" + hp.train.loss + ".pth"
+                                    + "_loss" + hp.train.loss \
+                                    + "_wd" + str(hp.train.wd) + ".pth"
             ckpt_model_path = os.path.join(hp.train.checkpoint_dir, ckpt_model_filename)
             torch.save(embedder_net.state_dict(), ckpt_model_path)
 
@@ -156,7 +166,8 @@ def train(model_path):
                             + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                             + "_feat" + hp.data.feat_type \
                             + "_lr" + str(hp.train.lr) + "_optim" + hp.train.optim \
-                            + "_loss" + hp.train.loss + ".pth"
+                            + "_loss" + hp.train.loss \
+                            + "_wd" + str(hp.train.wd) + ".pth"
 
     save_model_path = os.path.join(hp.train.checkpoint_dir, save_model_filename)
     torch.save(embedder_net.state_dict(), save_model_path)
@@ -181,6 +192,7 @@ def testVoxCeleb(model_path):
     #print(embedder_net)
     print("Model type: "+hp.model.type)
 
+    #Load data
     print('==> reading data')
     triplets = np.load(os.path.join(hp.data.test_path, hp.data.feat_type, 'test_triplets.npy'),
                        allow_pickle=True)
@@ -195,6 +207,9 @@ def testVoxCeleb(model_path):
         s2 = torch.Tensor(t[2]).unsqueeze(0)
         e1 = embedder_net(s1.to(device))
         e2 = embedder_net(s2.to(device))
+        #normalize
+        e1 = e1 / torch.norm(e1, dim=1).unsqueeze(1)
+        e2 = e2 / torch.norm(e2, dim=1).unsqueeze(1)
         #e1 = embedder_net(s1)
         #e2 = embedder_net(s2)
         scores.append(torch.dot(e1.squeeze(0), e2.squeeze(0)).item())
