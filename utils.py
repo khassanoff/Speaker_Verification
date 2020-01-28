@@ -65,6 +65,9 @@ def normalize_0_1(values, max_value, min_value):
 def load_feat(np_file, mode = 'train'):
     spec = np.load(np_file)
     if mode.lower() == 'train':
+        if np.random.random() > 0.3:
+            spec = spec[:, :spec.shape[1]//2]
+            spec = np.concatenate((spec, spec), axis=1)
         # randomly select portion of a utterance of size tisv_frame, e.g. 250 frames
         randtime = np.random.randint(0, spec.shape[1]-hp.data.tisv_frame)
         spec = spec[:, randtime:randtime+hp.data.tisv_frame]
@@ -78,10 +81,11 @@ def extract_all_feat(wav_file, mode = 'train'):
     window_length = int(hp.data.window*hp.data.sr)
     hop_length = int(hp.data.hop*hp.data.sr)
 
-    if mode.lower() == 'train':
-        sound_file = np.append(sound_file, sound_file)
-    else:
-        sound_file = np.append(sound_file, sound_file[::-1])
+    #if mode.lower() == 'train':
+    #    sound_file = np.append(sound_file, sound_file)
+    #else:
+    #    sound_file = np.append(sound_file, sound_file[::-1])
+    sound_file = np.append(sound_file, sound_file[::-1])
 
     spec = librosa.stft(np.asfortranarray(sound_file), n_fft=hp.data.nfft, hop_length=hop_length,
                         win_length=window_length)

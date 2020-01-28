@@ -26,13 +26,13 @@ model:
 ---
 train:
     N: 160 #Number of speakers in batch
-    M: 1  #Number of utterances per speaker
+    M: 1 #Number of utterances per speaker
     num_workers: 0 #number of workers for dataloader
     lr: 0.001
     optim: 'Adam' #optimizer type: 'Adam', 'SGD', 'Adadelta'
     wd: 0.0001 #weight decay
     loss: 'si' #loss type: "si" (Speaker identification), 'ge2e' (generaliazed E2E loss), 'hybrid'
-    epochs: 1000 #Max training epoch 
+    epochs: 200 #Max training epoch 
     patience: 10
     log_interval: 100 #Iterations before printing progress
     checkpoint_interval: 10 #Save model after x speaker epochs

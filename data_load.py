@@ -80,14 +80,14 @@ class VoxCeleb_utter(Dataset):
 
     def __getitem__(self, idx):
         #spk_list = os.listdir(self.path)
-        utt_list = glob.glob(self.path+'/*/*')
+        #utt_list = glob.glob(self.path+'/*/*')
 
         #if self.shuffle:
             # select random speaker
         #    selected_file = random.sample(spk_list, 1)[0]
         #else:
         #    selected_file = spk_list[idx]
-        selected_utt = utt_list[idx]
+        selected_utt = self.utt_list[idx]
         spk_id = int(re.findall("(\d+)", os.path.basename(os.path.dirname(selected_utt)))[0])
 
         # load utterance spectrogram of selected speaker

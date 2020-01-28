@@ -69,6 +69,6 @@ def save_spectrogram_tisv_test():
 
 
 if __name__ == "__main__":
-    #save_spectrogram_tisv_train()
-    save_spectrogram_tisv_test()
+    save_spectrogram_tisv_train()
+    #save_spectrogram_tisv_test()
 
