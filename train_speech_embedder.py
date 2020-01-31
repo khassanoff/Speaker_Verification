@@ -13,10 +13,10 @@ import torch
 import pdb
 import numpy as np
 from torch.utils.data import DataLoader
-from utils import calculate_eer 
+from utils import calculate_eer, step_decay
 
 from hparam import hparam as hp
-from data_load import VoxCeleb
+from data_load import VoxCeleb, VoxCeleb_utter
 #from speech_embedder_net import SpeechEmbedder, GE2ELoss, get_centroids, get_cossim
 from speech_embedder_net import Resnet34_VLAD, SpeechEmbedder, GE2ELoss, SILoss, get_centroids, \
 get_cossim, HybridLoss
@@ -29,26 +29,28 @@ torch.backends.cudnn.benchmark = False
 
 
 def train(model_path):
-    device = torch.device("cuda:"+str(hp.device) if torch.cuda.is_available() else "cpu")
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(hp.device) # for multiple gpus
+    #device = torch.device("cuda:"+str(hp.device) if torch.cuda.is_available() else "cpu")
     #device = torch.device(hp.device)
  
     #checkpoint and log dir
     os.makedirs(hp.train.checkpoint_dir, exist_ok=True)
     log_file = "model" + hp.model.type + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                     + "_feat" + hp.data.feat_type + "_lr" + str(hp.train.lr) \
-                    + "_optim" + hp.train.optim + "_loss" + hp.train.loss +".log"
+                    + "_optim" + hp.train.optim + "_loss" + hp.train.loss \
+                    + "_wd" + str(hp.train.wd) + ".log"
     log_file_path = os.path.join(hp.train.checkpoint_dir, log_file)
 
-    #dataset
-    train_dataset = VoxCeleb()
-    train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
-                              num_workers=hp.train.num_workers, drop_last=True)
  
     #load model
     if hp.model.type.lower() == 'tresnet34':
-        embedder_net = Resnet34_VLAD().to(device)
+        embedder_net = Resnet34_VLAD()
     elif hp.model.type.lower() == 'rnn':
-        embedder_net = SpeechEmbedder().to(device)
+        embedder_net = SpeechEmbedder()
+
+    if torch.cuda.device_count() > 1:
+        embedder_net = torch.nn.DataParallel(embedder_net)
+    embedder_net = embedder_net.cuda()
     print(embedder_net)
 
     if hp.train.restore:
@@ -56,11 +58,23 @@ def train(model_path):
         embedder_net.load_state_dict(torch.load(model_path))
 
     if hp.train.loss.lower() == 'ge2e':
-        loss_fn = GE2ELoss(device)
+        #dataset
+        train_dataset = VoxCeleb()
+        train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
+                                  num_workers=hp.train.num_workers, drop_last=True)
+        loss_fn = GE2ELoss().cuda()
     elif hp.train.loss.lower() == 'si':
-        loss_fn = SILoss(512, len(train_dataset)).to(device)
+        #dataset
+        train_dataset = VoxCeleb_utter()
+        train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
+                                  num_workers=hp.train.num_workers, drop_last=True)
+        loss_fn = SILoss(512, train_dataset.num_of_spk).cuda()
     elif hp.train.loss.lower() == 'hybrid':
-        loss_fn = HybridLoss(512, len(train_dataset), device).to(device)
+        #dataset
+        train_dataset = VoxCeleb()
+        train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
+                                  num_workers=hp.train.num_workers, drop_last=True)
+        loss_fn = HybridLoss(512, len(train_dataset)).cuda()
 
     #Both net and loss have trainable parameters
 
@@ -68,53 +82,52 @@ def train(model_path):
         optimizer = torch.optim.SGD([
                     {'params': embedder_net.parameters()},
                     {'params': loss_fn.parameters()}
-                ], lr=hp.train.lr)
+                ], lr=hp.train.lr, weight_decay=hp.train.wd)
     elif hp.train.optim.lower() == 'adam':
         optimizer = torch.optim.Adam([
                     {'params': embedder_net.parameters()},
                     {'params': loss_fn.parameters()}
-                ], lr=hp.train.lr)
+                ], lr=hp.train.lr, weight_decay=hp.train.wd)
     elif hp.train.optim.lower() == 'adadelta':
         optimizer = torch.optim.Adadelta([
                     {'params': embedder_net.parameters()},
                     {'params': loss_fn.parameters()}
-                ], lr=hp.train.lr)
+                ], lr=hp.train.lr, weight_decay=hp.train.wd)
     print(optimizer)
  
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True,
-                    factor=0.9, patience=hp.train.patience, threshold=0.0001)
-    print(scheduler)
+    #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True,
+    #                factor=0.9, patience=hp.train.patience, threshold=0.0001)
+    #scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=hp.train.lr*0.01,
+    #                    cycle_momentum=False, max_lr=hp.train.lr, step_size_up=5*len(train_loader),
+    #                    mode="triangular")
+
+    #print(scheduler)
 
 
     #start training
     embedder_net.train()
     iteration = 0
     for e in range(hp.train.epochs):
+        step_decay(e, optimizer)
         total_loss = 0
         for batch_id, (mel_db_batch, spk_id) in enumerate(train_loader):
-            mel_db_batch = mel_db_batch.to(device)
-            spk_id = spk_id.to(device)
+            mel_db_batch = mel_db_batch.cuda()
+            spk_id = spk_id.cuda()
 
             mel_db_batch = torch.reshape(mel_db_batch, (hp.train.N*hp.train.M, mel_db_batch.size(2),
                                                         mel_db_batch.size(3)))
-            #perm = random.sample(range(0, hp.train.N*hp.train.M), hp.train.N*hp.train.M)
-            #unperm = list(perm)
-            #for i,j in enumerate(perm):
-            #    unperm[j] = i
-            #mel_db_batch = mel_db_batch[perm]
-            #gradient accumulates
             optimizer.zero_grad()
 
             embeddings = embedder_net(mel_db_batch)
-            #embeddings = embeddings[unperm]
             embeddings = torch.reshape(embeddings, (hp.train.N, hp.train.M, embeddings.size(1)))
 
             #get loss, call backward, step optimizer
             loss = loss_fn(embeddings, spk_id) #wants (Speaker, Utterances, embedding)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(embedder_net.parameters(), 3.0)
-            torch.nn.utils.clip_grad_norm_(loss_fn.parameters(), 1.0)
+
             optimizer.step()
+            #scheduler.step()
+            #print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
 
             total_loss = total_loss + loss
             iteration += 1
@@ -128,7 +141,7 @@ def train(model_path):
                         f.write(mesg)
 
                 if (batch_id + 1) % (len(train_dataset)//hp.train.N) == 0:
-                    scheduler.step(total_loss)
+                #    scheduler.step(total_loss)
                     print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
 
         if hp.train.checkpoint_dir is not None and (e + 1) % hp.train.checkpoint_interval == 0:
@@ -138,16 +151,17 @@ def train(model_path):
                                     + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                                     + "_feat" + hp.data.feat_type \
                                     + "_lr" + str(hp.train.lr) + "_optim" + hp.train.optim \
-                                    + "_loss" + hp.train.loss + ".pth"
+                                    + "_loss" + hp.train.loss \
+                                    + "_wd" + str(hp.train.wd) + ".pth"
             ckpt_model_path = os.path.join(hp.train.checkpoint_dir, ckpt_model_filename)
             torch.save(embedder_net.state_dict(), ckpt_model_path)
 
             eer, thresh = testVoxCeleb(ckpt_model_path)
-            mesg = ("\nEER : %0.2f (thres:%0.2f)\n"%(eer, thresh))
+            mesg = ("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
             mesg += ("learning rate: {0:.8f}\n".format(optimizer.param_groups[1]['lr']))
             with open(log_file_path, 'a') as f:
                 f.write(mesg)
-            embedder_net.to(device).train()
+            embedder_net.train().cuda()
 
     #save model
     embedder_net.eval().cpu()
@@ -156,7 +170,8 @@ def train(model_path):
                             + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                             + "_feat" + hp.data.feat_type \
                             + "_lr" + str(hp.train.lr) + "_optim" + hp.train.optim \
-                            + "_loss" + hp.train.loss + ".pth"
+                            + "_loss" + hp.train.loss \
+                            + "_wd" + str(hp.train.wd) + ".pth"
 
     save_model_path = os.path.join(hp.train.checkpoint_dir, save_model_filename)
     torch.save(embedder_net.state_dict(), save_model_path)
@@ -166,46 +181,58 @@ def train(model_path):
 
 
 def testVoxCeleb(model_path):
-    device = torch.device("cuda:"+str(hp.device) if torch.cuda.is_available() else "cpu")
+    os.environ["CUDA_VISIBLE_DEVICES"] =str(hp.device) # for multiple gpus
+    #device = torch.device("cuda:"+str(hp.device) if torch.cuda.is_available() else "cpu")
 
     print('==> calculating test({}) data lists...'.format(os.path.join(hp.data.test_path,
                                                                        hp.data.feat_type)))
     #Load model
     print('==> loading model({})'.format(model_path))
     if hp.model.type.lower() == 'tresnet34':
-        embedder_net = Resnet34_VLAD().to(device)
+        embedder_net = Resnet34_VLAD()
     elif hp.model.type.lower() == 'rnn':
-        embedder_net = SpeechEmbedder().to(device)
+        embedder_net = SpeechEmbedder()
+
+    if torch.cuda.device_count() > 1:
+        embedder_net = torch.nn.DataParallel(embedder_net)
+    embedder_net = embedder_net.cuda()
     embedder_net.load_state_dict(torch.load(model_path))
     embedder_net.eval()
     #print(embedder_net)
     print("Model type: "+hp.model.type)
 
+    #Load data
     print('==> reading data')
-    triplets = np.load(os.path.join(hp.data.test_path, hp.data.feat_type, 'test_triplets.npy'),
-                       allow_pickle=True)
-    print("*number of test cases {}".format(triplets.shape[0]))
+    triplet_files = os.listdir(os.path.join(hp.data.test_path, hp.data.feat_type))
+    #triplets = np.load(os.path.join(hp.data.test_path, hp.data.feat_type, 'test_triplets.npy'),
+    #                   allow_pickle=True)
+    print("*number of test cases {}".format(len(triplet_files)))
 
     print('==> computing scores')
     scores, labels = [], []
     counter = 0
-    for t in triplets:
+    for f in triplet_files:
+        t = np.load(os.path.join(hp.data.test_path, hp.data.feat_type, f), allow_pickle=True)
         labels.append(t[0])
         s1 = torch.Tensor(t[1]).unsqueeze(0)
         s2 = torch.Tensor(t[2]).unsqueeze(0)
-        e1 = embedder_net(s1.to(device))
-        e2 = embedder_net(s2.to(device))
+        e1 = embedder_net(s1.cuda())
+        e2 = embedder_net(s2.cuda())
+        #normalize
+        e1 = e1 / torch.norm(e1, dim=1).unsqueeze(1)
+        e2 = e2 / torch.norm(e2, dim=1).unsqueeze(1)
         #e1 = embedder_net(s1)
         #e2 = embedder_net(s2)
         scores.append(torch.dot(e1.squeeze(0), e2.squeeze(0)).item())
         counter += 1
         if counter % 1000 == 0:
             print("*completed {} pairs ({})".format(counter, time.ctime()))
+    print("*completed {} pairs ({})".format(counter, time.ctime()))
 
     #Compute EER
     print('==> computing eer')
     eer, thresh = calculate_eer(labels, np.array(scores))
-    print("\nEER : %0.2f (thres:%0.2f)"%(eer, thresh))
+    print("\nEER : %0.4f (thres:%0.2f)"%(eer, thresh))
     return eer, thresh
 
 
