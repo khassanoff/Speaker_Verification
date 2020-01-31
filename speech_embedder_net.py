@@ -36,17 +36,16 @@ class SpeechEmbedder(nn.Module):
         return x
 
 class GE2ELoss(nn.Module):
-    def __init__(self, device):
+    def __init__(self):
         super(GE2ELoss, self).__init__()
-        self.w = nn.Parameter(torch.tensor(10.0).to(device), requires_grad=True)
-        self.b = nn.Parameter(torch.tensor(-5.0).to(device), requires_grad=True)
-        self.device = device
+        self.w = nn.Parameter(torch.tensor(10.0), requires_grad=True).cuda()
+        self.b = nn.Parameter(torch.tensor(-5.0), requires_grad=True).cuda()
 
     def forward(self, embeddings, y=None):
         torch.clamp(self.w, 1e-6)
         centroids = get_centroids(embeddings)
         cossim = get_cossim(embeddings, centroids)
-        sim_matrix = self.w*cossim.to(self.device) + self.b
+        sim_matrix = self.w*cossim + self.b
         loss, _ = calc_loss(sim_matrix)
         return loss
 
@@ -63,14 +62,13 @@ class SILoss(nn.Module):
         return loss
 
 class HybridLoss(nn.Module):
-    def __init__(self, emb_size, num_of_spks, device):
+    def __init__(self, emb_size, num_of_spks):
         super(HybridLoss, self).__init__()
-        self.device = device
-        self.ge2eloss = GE2ELoss(device)
+        self.ge2eloss = GE2ELoss()
         self.siloss = SILoss(emb_size, num_of_spks)
 
     def forward(self, x, y):
-        l1 = self.ge2eloss(x).to(self.device)
+        l1 = self.ge2eloss(x)
         l2 = self.siloss(x, y)
         return l1 + l2
 
@@ -146,6 +144,9 @@ class Resnet34_VLAD(nn.Module):
         self.cluster = nn.Parameter(data=torch.Tensor(10, 512), requires_grad=True)
         self.dense = nn.Linear(vlad_centers*512, filters[3][2])
         
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d) or isinstance(m, nn.Parameter):
+                nn.init.orthogonal_(m.weight)
      
     def forward(self, x):
         x = x.unsqueeze(1)

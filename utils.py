@@ -14,6 +14,38 @@ import pdb
 
 from hparam import hparam as hp
 
+def step_decay(epoch, optimizer):
+    '''
+    The learning rate begins at 10^initial_power,
+    and decreases by a factor of 10 every step epochs.
+    '''
+    half_epoch = hp.train.epochs // 2
+    stage1, stage2, stage3 = int(half_epoch * 0.5), int(half_epoch * 0.8), half_epoch
+    stage4 = stage3 + stage1
+    stage5 = stage4 + (stage2 - stage1)
+    stage6 = hp.train.epochs
+
+    if hp.train.warmup_epochs>0:
+        milestone = [1, stage1, stage2, stage3, stage4, stage5, stage6]
+        gamma = [0.1, 1.0, 0.1, 0.01, 1.0, 0.1, 0.01]
+    else:
+        milestone = [stage1, stage2, stage3, stage4, stage5, stage6]
+        gamma = [1.0, 0.1, 0.01, 1.0, 0.1, 0.01]
+
+    lr = 0.005
+    init_lr = hp.train.lr
+    stage = len(milestone)
+    for s in range(stage):
+        if epoch < milestone[s]:
+            lr = init_lr * gamma[s]
+            break
+
+    print('Learning rate for epoch {} is {}.'.format(epoch + 1, lr))
+    for param in optimizer.param_groups:
+        param['lr'] = np.float(lr)
+
+    #return np.float(lr)
+
 def get_centroids(embeddings):
     centroids = []
     for speaker in embeddings:
@@ -36,7 +68,7 @@ def get_centroid(embeddings, speaker_num, utterance_num):
 
 def get_cossim(embeddings, centroids):
     # Calculates cosine similarity matrix. Requires (N, M, feature) input
-    cossim = torch.zeros(embeddings.size(0),embeddings.size(1),centroids.size(0))
+    cossim = torch.zeros(embeddings.size(0),embeddings.size(1),centroids.size(0)).cuda()
     for speaker_num, speaker in enumerate(embeddings):
         for utterance_num, utterance in enumerate(speaker):
             for centroid_num, centroid in enumerate(centroids):
@@ -49,7 +81,7 @@ def get_cossim(embeddings, centroids):
 
 def calc_loss(sim_matrix):
     # Calculates loss from (N, M, K) similarity matrix
-    per_embedding_loss = torch.zeros(sim_matrix.size(0), sim_matrix.size(1))
+    per_embedding_loss = torch.zeros(sim_matrix.size(0), sim_matrix.size(1)).cuda()
     for j in range(len(sim_matrix)):
         for i in range(sim_matrix.size(1)):
             per_embedding_loss[j][i] = -(sim_matrix[j][i][j] - ((torch.exp(sim_matrix[j][i]).sum()+1e-6).log_()))

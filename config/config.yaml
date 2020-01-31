@@ -1,5 +1,5 @@
 training: !!bool "true"
-device: 5 #gpu id
+device: 4,5 #gpu id
 seed: 777
 ---
 data:
@@ -22,7 +22,7 @@ model:
     num_layer: 3 #Number of LSTM layers
     proj: 256 #Embedding size
     #Model path for testing, inference, or resuming training
-    model_path: './speech_id_checkpoint/final_epoch1000_batchID151_modelTResNet34_spk8_utt8_featspec_ext_lr0.1_optimAdadelta_lossge2e.pth'
+    model_path: './speech_id_checkpoint/ckpt_epoch600_batchID151_modelTResNet34_spk8_utt8_featspec_lr0.1_optimAdadelta_lossge2e.pth'
 ---
 train:
     N: 160 #Number of speakers in batch
@@ -30,11 +30,12 @@ train:
     num_workers: 0 #number of workers for dataloader
     lr: 0.001
     optim: 'Adam' #optimizer type: 'Adam', 'SGD', 'Adadelta'
-    wd: 0.0001 #weight decay
     loss: 'si' #loss type: "si" (Speaker identification), 'ge2e' (generaliazed E2E loss), 'hybrid'
-    epochs: 200 #Max training epoch 
+    warmup_epochs: 1 #number of warmup epochs with lr set to lr/10
+    wd: 0.0001 #weight decay
+    epochs: 128 #Max training epoch
     patience: 10
     log_interval: 100 #Iterations before printing progress
-    checkpoint_interval: 10 #Save model after x speaker epochs
+    checkpoint_interval: 20 #Save model after x speaker epochs
     checkpoint_dir: './speech_id_checkpoint'
     restore: !!bool "false" #Resume training from previous model path

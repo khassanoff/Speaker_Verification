@@ -53,22 +53,24 @@ def save_spectrogram_tisv_test():
     list1 = np.array([os.path.join(hp.data.test_path_unprocessed, i[1]) for i in verify_list])
     list2 = np.array([os.path.join(hp.data.test_path_unprocessed, i[2]) for i in verify_list])
 
-    triplets = []
+    #triplets = []
     #c = 0
-    for l, p1, p2 in zip(labels, list1, list2):
+    for i, (l, p1, p2) in enumerate(zip(labels, list1, list2)):
         s1 = extract_all_feat(p1, mode = 'test').transpose()    #dim: time, spec
         s2 = extract_all_feat(p2, mode = 'test').transpose()
-        triplets.append([l, s1, s2])
+        triplet = np.array([l, s1, s2])
+        np.save(os.path.join(hp.data.test_path, hp.data.feat_type, "test_triplet%d.npy"%i), triplet)
+        #triplets.append([l, s1, s2])
         #c += 1
         #if c>=100:
         #    break
 
-    triplets = np.array(triplets)
-    print(triplets.shape)
-    np.save(os.path.join(hp.data.test_path, hp.data.feat_type, "test_triplets.npy"), triplets)
+    #triplets = np.array(triplets)
+    #print(triplets.shape)
+    #np.save(os.path.join(hp.data.test_path, hp.data.feat_type, "test_triplets.npy"), triplets)
 
 
 if __name__ == "__main__":
-    save_spectrogram_tisv_train()
-    #save_spectrogram_tisv_test()
+    #save_spectrogram_tisv_train()
+    save_spectrogram_tisv_test()
 
