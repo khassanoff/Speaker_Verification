@@ -196,7 +196,7 @@ def testVoxCelebOptim(model_path):
     embedder_net.eval()
     #print(embedder_net)
     print("Model type: "+hp.model.type)
-    verify_list = np.loadtxt(hp.test_meta_path, str)
+    verify_list = np.loadtxt(hp.data.test_meta_path, str)
     list1 = np.array([i[1] for i in verify_list])
     list2 = np.array([i[2] for i in verify_list])
     total_list = np.concatenate((list1, list2))
