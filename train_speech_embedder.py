@@ -38,7 +38,7 @@ def train(model_path):
     log_file = "model" + hp.model.type + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                     + "_feat" + hp.data.feat_type + "_lr" + str(hp.train.lr) \
                     + "_optim" + hp.train.optim + "_loss" + hp.train.loss \
-                    + "_wd" + str(hp.train.wd) + ".log"
+                    + "_wd" + str(hp.train.wd) + "_fr" + str(hp.data.tisv_frame) + ".log"
     log_file_path = os.path.join(hp.train.checkpoint_dir, log_file)
 
  
@@ -97,18 +97,16 @@ def train(model_path):
  
     #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True,
     #                factor=0.9, patience=hp.train.patience, threshold=0.0001)
-    #scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=hp.train.lr*0.01,
-    #                    cycle_momentum=False, max_lr=hp.train.lr, step_size_up=5*len(train_loader),
-    #                    mode="triangular")
-
-    #print(scheduler)
-
+    scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=hp.train.lr*0.01,
+                    cycle_momentum=False, max_lr=hp.train.lr, step_size_up=10*len(train_loader),
+                    mode="triangular")
+    print(scheduler)
 
     #start training
     embedder_net.train()
     iteration = 0
     for e in range(hp.train.epochs):
-        step_decay(e, optimizer)
+        #step_decay(e, optimizer)
         total_loss = 0
         for batch_id, (mel_db_batch, spk_id) in enumerate(train_loader):
             mel_db_batch = mel_db_batch.cuda()
@@ -126,7 +124,7 @@ def train(model_path):
             loss.backward()
 
             optimizer.step()
-            #scheduler.step()
+            scheduler.step()    #uncomment for iteration based schedulers, eg. CycliclLR
             #print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
 
             total_loss = total_loss + loss
@@ -141,7 +139,7 @@ def train(model_path):
                         f.write(mesg)
 
                 if (batch_id + 1) % (len(train_dataset)//hp.train.N) == 0:
-                #    scheduler.step(total_loss)
+                    #scheduler.step(total_loss) # uncommenr for ReduceLROnPlateau scheduler
                     print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
 
         if hp.train.checkpoint_dir is not None and (e + 1) % hp.train.checkpoint_interval == 0:

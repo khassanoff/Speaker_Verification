@@ -14,7 +14,7 @@ data:
     window: 0.025 #(s)
     hop: 0.01 #(s)
     nmels: 40 #Number of mel energies
-    tisv_frame: 250 #Max number of time steps/frames in input after preprocess
+    tisv_frame: 300 #Max number of time steps/frames in input after preprocess
 ---
 model:
     type: 'TResNet34' #model type: 'TResNet32' (Thin ResNet34), 'RNN'
@@ -25,17 +25,17 @@ model:
     model_path: './speech_id_checkpoint/ckpt_epoch600_batchID151_modelTResNet34_spk8_utt8_featspec_lr0.1_optimAdadelta_lossge2e.pth'
 ---
 train:
-    N: 160 #Number of speakers in batch
+    N: 256 #Number of speakers in batch
     M: 1 #Number of utterances per speaker
     num_workers: 0 #number of workers for dataloader
     lr: 0.001
-    optim: 'Adam' #optimizer type: 'Adam', 'SGD', 'Adadelta'
+    optim: 'Adam' #optimizer type: 'Adam' (lr 0.001), 'SGD', 'Adadelta' (lr 0.1)
     loss: 'si' #loss type: "si" (Speaker identification), 'ge2e' (generaliazed E2E loss), 'hybrid'
     warmup_epochs: 1 #number of warmup epochs with lr set to lr/10
-    wd: 0.0001 #weight decay
-    epochs: 128 #Max training epoch
+    wd: 0.0 #weight decay
+    epochs: 120 #Max training epoch
     patience: 10
     log_interval: 100 #Iterations before printing progress
-    checkpoint_interval: 20 #Save model after x speaker epochs
+    checkpoint_interval: 20 #Save model after x epochs
     checkpoint_dir: './speech_id_checkpoint'
     restore: !!bool "false" #Resume training from previous model path
