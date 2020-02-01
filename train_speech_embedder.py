@@ -14,7 +14,7 @@ import pdb
 import numpy as np
 from torch.utils.data import DataLoader
 from utils import calculate_eer, step_decay
-
+from tqdm import tqdm as tqdm
 from hparam import hparam as hp
 from data_load import VoxCeleb, VoxCeleb_utter
 #from speech_embedder_net import SpeechEmbedder, GE2ELoss, get_centroids, get_cossim
@@ -154,7 +154,7 @@ def train(model_path):
             ckpt_model_path = os.path.join(hp.train.checkpoint_dir, ckpt_model_filename)
             torch.save(embedder_net.state_dict(), ckpt_model_path)
 
-            eer, thresh = testVoxCeleb(ckpt_model_path)
+            eer, thresh = testVoxCelebOptim(ckpt_model_path)
             mesg = ("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
             mesg += ("learning rate: {0:.8f}\n".format(optimizer.param_groups[1]['lr']))
             with open(log_file_path, 'a') as f:
@@ -175,9 +175,59 @@ def train(model_path):
     torch.save(embedder_net.state_dict(), save_model_path)
 
     print("\nDone, trained model saved at", save_model_path)
-    testVoxCeleb(save_model_path)
+    testVoxCelebOptim(save_model_path)
 
 
+def testVoxCelebOptim(model_path):
+    os.environ["CUDA_VISIBLE_DEVICES"] =str(hp.device) # for multiple gpus
+    print('==> calculating test({}) data lists...'.format(os.path.join(hp.data.test_path,
+                                                                       hp.data.feat_type)))
+    #Load model
+    print('==> loading model({})'.format(model_path))
+    if hp.model.type.lower() == 'tresnet34':
+        embedder_net = Resnet34_VLAD()
+    elif hp.model.type.lower() == 'rnn':
+        embedder_net = SpeechEmbedder()
+        
+    if torch.cuda.device_count() > 1:
+        embedder_net = torch.nn.DataParallel(embedder_net)
+    embedder_net = embedder_net.cuda()
+    embedder_net.load_state_dict(torch.load(model_path))
+    embedder_net.eval()
+    #print(embedder_net)
+    print("Model type: "+hp.model.type)
+    verify_list = np.loadtxt(hp.test_meta_path, str)
+    list1 = np.array([i[1] for i in verify_list])
+    list2 = np.array([i[2] for i in verify_list])
+    total_list = np.concatenate((list1, list2))
+    unique_list = np.unique(total_list, return_index=True)
+    vectors = {}
+    print('==> computing unique vectors')
+    counter = 0
+    for index, wav_file in tqdm(enumerate(unique_list[0])):
+        original_index = unique_list[1][index]
+        spec = np.load(os.path.join(hp.data.test_path, hp.data.feat_type, 'test_triplet'+str(original_index)+'.npy'), allow_pickle=True)[1]
+        s1 = torch.Tensor(spec).unsqueeze(0)
+        #pdb.set_trace()
+        e1 = embedder_net(s1.cuda())
+        vectors[wav_file] = e1.cpu().detach()
+        
+    scores, labels = [], []
+    for (label, el1, el2) in verify_list:
+        labels.append(int(label))
+        e1 = vectors[el1]
+        e2 = vectors[el2]
+        e1 = e1 / torch.norm(e1, dim=1).unsqueeze(1)
+        e2 = e2 / torch.norm(e2, dim=1).unsqueeze(1)
+        scores.append(torch.dot(e1.squeeze(0), e2.squeeze(0)).item())
+    #Compute EER
+    print('==> computing eer')
+    eer, thresh = calculate_eer(labels, np.array(scores))
+    print("\nEER : %0.4f (thres:%0.2f)"%(eer, thresh))
+    return eer, thresh
+    
+    
+    
 def testVoxCeleb(model_path):
     os.environ["CUDA_VISIBLE_DEVICES"] =str(hp.device) # for multiple gpus
     #device = torch.device("cuda:"+str(hp.device) if torch.cuda.is_available() else "cpu")
@@ -238,4 +288,4 @@ if __name__=="__main__":
     if hp.training:
         train(hp.model.model_path)
     else:
-        testVoxCeleb(hp.model.model_path)
+        testVoxCelebOptim(hp.model.model_path)
