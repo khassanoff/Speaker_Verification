@@ -98,7 +98,7 @@ def train(model_path):
     #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True,
     #                factor=0.9, patience=hp.train.patience, threshold=0.0001)
     scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=hp.train.lr*0.01,
-                    cycle_momentum=False, max_lr=hp.train.lr, step_size_up=10*len(train_loader),
+                    cycle_momentum=False, max_lr=hp.train.lr, step_size_up=5*len(train_loader),
                     mode="triangular")
     print(scheduler)
 
@@ -223,7 +223,7 @@ def testVoxCelebOptim(model_path):
     #Compute EER
     print('==> computing eer')
     eer, thresh = calculate_eer(labels, np.array(scores))
-    print("\nEER : %0.4f (thres:%0.2f)"%(eer, thresh))
+    print("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
     return eer, thresh
     
     
