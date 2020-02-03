@@ -77,8 +77,6 @@ input_dim = 1
 block1_input = 64
 filters = [[48, 48, 96], [96, 96, 128], [128, 128, 256], [256, 256, 512]]
 conv_block_input = 32
-vlad_centers = 10
-
 def conv_block(input_dim, filters, strides):
     return nn.Sequential(
             nn.Conv2d(input_dim, filters[0], kernel_size=1, bias=False, stride=strides),
@@ -139,15 +137,15 @@ class Resnet34_VLAD(nn.Module):
         self.max_pool2 = nn.MaxPool2d((3, 1), stride=(2, 1))
         
         self.conv2 = nn.Conv2d(filters[3][2], filters[3][2], kernel_size=(7,1), bias=True)
-        self.conv3 = nn.Conv2d(filters[3][2], vlad_centers, kernel_size=(7,1), bias=True)
+        self.conv3 = nn.Conv2d(filters[3][2], hp.model.vlad_centers+hp.model.ghost_centers, kernel_size=(7,1), bias=True)
         
-        self.cluster = nn.Parameter(data=torch.Tensor(10, 512), requires_grad=True)
-        self.dense = nn.Linear(vlad_centers*512, filters[3][2])
-        
+        self.cluster = nn.Parameter(data=torch.Tensor(hp.model.vlad_centers+hp.model.ghost_centers, 512), requires_grad=True)
+        self.dense = nn.Linear(hp.model.vlad_centers*512, hp.model.proj)
+    
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.Parameter):
                 nn.init.orthogonal_(m.weight)
-     
+        
     def forward(self, x):
         x = x.unsqueeze(1)
         # ============================
@@ -210,12 +208,15 @@ class Resnet34_VLAD(nn.Module):
     
         #feat_broadcast = x_fc  # feat_broadcast : bz x W x H x 1 x D
         feat_broadcast = feat_broadcast.unsqueeze(-2)
-    
         feat_res = feat_broadcast - self.cluster
         weighted_res = torch.mul(A, feat_res)
         cluster_res  = torch.sum(weighted_res, (1, 2))
+        
+        if hp.model.ghost_centers>0:
+            cluster_res = cluster_res[:, :hp.model.vlad_centers, :]
+            
         cluster_l2 = nn.functional.normalize(cluster_res,dim=-1, p=2)
-        x = cluster_l2.view(-1, vlad_centers*512)
+        x = cluster_l2.view(-1, hp.model.vlad_centers*512)
         
         # ============================
         #   Fully Connected Block 2
