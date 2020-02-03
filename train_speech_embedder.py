@@ -68,13 +68,13 @@ def train(model_path):
         train_dataset = VoxCeleb_utter()
         train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
                                   num_workers=hp.train.num_workers, drop_last=True)
-        loss_fn = SILoss(512, train_dataset.num_of_spk).cuda()
+        loss_fn = SILoss(hp.model.proj, train_dataset.num_of_spk).cuda()
     elif hp.train.loss.lower() == 'hybrid':
         #dataset
         train_dataset = VoxCeleb()
         train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
                                   num_workers=hp.train.num_workers, drop_last=True)
-        loss_fn = HybridLoss(512, len(train_dataset)).cuda()
+        loss_fn = HybridLoss(hp.model.proj, len(train_dataset)).cuda()
 
     #Both net and loss have trainable parameters
 
