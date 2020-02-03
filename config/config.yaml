@@ -23,6 +23,7 @@ model:
     proj: 256 #Embedding size
     ghost_centers: 0
     vlad_centers: 10
+    dropout: 0.5
     #Model path for testing, inference, or resuming training
     model_path: './speech_id_checkpoint/ckpt_epoch600_batchID151_modelTResNet34_spk8_utt8_featspec_lr0.1_optimAdadelta_lossge2e.pth'
 ---
