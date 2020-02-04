@@ -38,7 +38,8 @@ def train(model_path):
     log_file = "model" + hp.model.type + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                     + "_feat" + hp.data.feat_type + "_lr" + str(hp.train.lr) \
                     + "_optim" + hp.train.optim + "_loss" + hp.train.loss \
-                    + "_wd" + str(hp.train.wd) + "_fr" + str(hp.data.tisv_frame) + ".log"
+                    + "_wd" + str(hp.train.wd) + "_fr" + str(hp.data.tisv_frame) \
+                    + ".log"
     log_file_path = os.path.join(hp.train.checkpoint_dir, log_file)
 
  
@@ -99,8 +100,8 @@ def train(model_path):
                 ], lr=hp.train.lr, weight_decay=hp.train.wd)
     print(optimizer)
  
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True,
-                    factor=0.9, patience=hp.train.patience, threshold=0.0001)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', verbose=True,
+                    factor=0.5, patience=hp.train.patience, threshold=0.0001)
     #scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=hp.train.lr*0.01,
     #                cycle_momentum=False, max_lr=hp.train.lr, step_size_up=5*len(train_loader),
     #                mode="triangular")
@@ -140,7 +141,7 @@ def train(model_path):
                     f.write(mesg)
                     
                 if (batch_id + 1) % (len(train_dataset)//hp.train.N) == 0:
-                    scheduler.step(total_loss) # uncommenr for ReduceLROnPlateau scheduler
+                    #scheduler.step(total_loss) # uncommenr for ReduceLROnPlateau scheduler
                     print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
         
       
@@ -158,6 +159,7 @@ def train(model_path):
                 _, answer = loss_fn(embeddings, spk_id)
                 n_dev_correct += (torch.max(answer, 1)[1].view(spk_id.size()) == spk_id).sum().item()
         dev_acc = 100. * n_dev_correct / test_size
+        scheduler.step(dev_acc) # uncommenr for ReduceLROnPlateau scheduler
         mesg = ("dev accuracy: {0:.8f}\n".format(dev_acc))
         print(mesg)
         with open(log_file_path, 'a') as f:
