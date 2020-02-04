@@ -1,5 +1,5 @@
 training: !!bool "true"
-device: 4,5 #gpu id
+device: 1,2 #gpu id
 seed: 777
 ---
 data:
@@ -20,10 +20,10 @@ model:
     type: 'TResNet34' #model type: 'TResNet32' (Thin ResNet34), 'RNN'
     hidden: 768 #Number of LSTM hidden layer units
     num_layer: 3 #Number of LSTM layers
-    proj: 256 #Embedding size
+    proj: 512 #Embedding size
     ghost_centers: 0
     vlad_centers: 10
-    dropout: 0.5
+    dropout: 0.0
     #Model path for testing, inference, or resuming training
     model_path: './speech_id_checkpoint/ckpt_epoch600_batchID151_modelTResNet34_spk8_utt8_featspec_lr0.1_optimAdadelta_lossge2e.pth'
 ---

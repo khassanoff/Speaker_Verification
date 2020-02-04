@@ -59,7 +59,7 @@ class SILoss(nn.Module):
         x = torch.reshape(x, (hp.train.N*hp.train.M, x.size(2)))
         x = self.linear(x)
         loss = F.cross_entropy(x, y)
-        return loss
+        return loss, x
 
 class HybridLoss(nn.Module):
     def __init__(self, emb_size, num_of_spks):
