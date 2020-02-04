@@ -59,7 +59,7 @@ class SILoss(nn.Module):
         x = torch.reshape(x, (hp.train.N*hp.train.M, x.size(2)))
         x = self.linear(x)
         loss = F.cross_entropy(x, y)
-        return loss
+        return loss, x
 
 class HybridLoss(nn.Module):
     def __init__(self, emb_size, num_of_spks):
@@ -141,7 +141,7 @@ class Resnet34_VLAD(nn.Module):
         
         self.cluster = nn.Parameter(data=torch.Tensor(hp.model.vlad_centers+hp.model.ghost_centers, 512), requires_grad=True)
         self.dense = nn.Linear(hp.model.vlad_centers*512, hp.model.proj)
-    
+        self.dropout = nn.Dropout(hp.model.dropout)
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.Parameter):
                 nn.init.orthogonal_(m.weight)
@@ -220,8 +220,10 @@ class Resnet34_VLAD(nn.Module):
         
         # ============================
         #   Fully Connected Block 2
-        # ============================   
+        # ============================  
         x = self.dense(x)
+        x = self.dropout(x)
+        
         #unit vector normalization
         #x = x / torch.norm(x, dim=1).unsqueeze(1)
 

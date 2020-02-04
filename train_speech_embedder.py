@@ -66,8 +66,12 @@ def train(model_path):
     elif hp.train.loss.lower() == 'si':
         #dataset
         train_dataset = VoxCeleb_utter()
-        train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
+        train_size = int(0.9 * len(train_dataset))
+        test_size = len(train_dataset) - train_size
+        train_dt, test_dt = torch.utils.data.random_split(train_dataset, [train_size, test_size])
+        train_loader = DataLoader(train_dt, batch_size=hp.train.N, shuffle=True,
                                   num_workers=hp.train.num_workers, drop_last=True)
+        test_loader = DataLoader(test_dt, batch_size=hp.train.N, num_workers=hp.train.num_workers, drop_last=True)
         loss_fn = SILoss(hp.model.proj, train_dataset.num_of_spk).cuda()
     elif hp.train.loss.lower() == 'hybrid':
         #dataset
@@ -101,28 +105,25 @@ def train(model_path):
                     cycle_momentum=False, max_lr=hp.train.lr, step_size_up=5*len(train_loader),
                     mode="triangular")
     print(scheduler)
-
-    #start training
-    embedder_net.train()
+    
     iteration = 0
     for e in range(hp.train.epochs):
         #step_decay(e, optimizer)
         total_loss = 0
         for batch_id, (mel_db_batch, spk_id) in enumerate(train_loader):
+            embedder_net.train()
             mel_db_batch = mel_db_batch.cuda()
             spk_id = spk_id.cuda()
 
             mel_db_batch = torch.reshape(mel_db_batch, (hp.train.N*hp.train.M, mel_db_batch.size(2),
                                                         mel_db_batch.size(3)))
             optimizer.zero_grad()
-
             embeddings = embedder_net(mel_db_batch)
             embeddings = torch.reshape(embeddings, (hp.train.N, hp.train.M, embeddings.size(1)))
 
             #get loss, call backward, step optimizer
-            loss = loss_fn(embeddings, spk_id) #wants (Speaker, Utterances, embedding)
+            loss, _ = loss_fn(embeddings, spk_id) #wants (Speaker, Utterances, embedding)
             loss.backward()
-
             optimizer.step()
             scheduler.step()    #uncomment for iteration based schedulers, eg. CycliclLR
             #print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
@@ -136,12 +137,31 @@ def train(model_path):
                         loss, total_loss / (batch_id + 1))
                 print(mesg)
                 with open(log_file_path, 'a') as f:
-                        f.write(mesg)
-
+                    f.write(mesg)
+                    
                 if (batch_id + 1) % (len(train_dataset)//hp.train.N) == 0:
                     #scheduler.step(total_loss) # uncommenr for ReduceLROnPlateau scheduler
                     print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
-
+        
+      
+        # switch model to evaluation mode
+        embedder_net.eval()
+        # calculate accuracy on validation set
+        n_dev_correct = 0
+        with torch.no_grad():
+            for dev_batch_idx, (dev_batch, spk_id) in enumerate(test_loader):
+                dev_batch = dev_batch.cuda()
+                spk_id = spk_id.cuda()
+                dev_batch = torch.reshape(dev_batch, (hp.train.N*hp.train.M, dev_batch.size(2), dev_batch.size(3)))
+                embeddings = embedder_net(dev_batch)
+                embeddings = torch.reshape(embeddings, (hp.train.N*hp.train.M, 1, embeddings.size(1)))
+                _, answer = loss_fn(embeddings, spk_id)
+                n_dev_correct += (torch.max(answer, 1)[1].view(spk_id.size()) == spk_id).sum().item()
+        dev_acc = 100. * n_dev_correct / test_size
+        mesg = ("dev accuracy: {0:.8f}\n".format(dev_acc))
+        print(mesg)
+        with open(log_file_path, 'a') as f:
+            f.write(mesg)
         if hp.train.checkpoint_dir is not None and (e + 1) % hp.train.checkpoint_interval == 0:
             embedder_net.eval().cpu()
             ckpt_model_filename = "ckpt_epoch" + str(e+1) + "_batchID" + str(batch_id+1) \
@@ -226,63 +246,6 @@ def testVoxCelebOptim(model_path):
     print("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
     return eer, thresh
     
-    
-    
-def testVoxCeleb(model_path):
-    os.environ["CUDA_VISIBLE_DEVICES"] =str(hp.device) # for multiple gpus
-    #device = torch.device("cuda:"+str(hp.device) if torch.cuda.is_available() else "cpu")
-
-    print('==> calculating test({}) data lists...'.format(os.path.join(hp.data.test_path,
-                                                                       hp.data.feat_type)))
-    #Load model
-    print('==> loading model({})'.format(model_path))
-    if hp.model.type.lower() == 'tresnet34':
-        embedder_net = Resnet34_VLAD()
-    elif hp.model.type.lower() == 'rnn':
-        embedder_net = SpeechEmbedder()
-
-    if torch.cuda.device_count() > 1:
-        embedder_net = torch.nn.DataParallel(embedder_net)
-    embedder_net = embedder_net.cuda()
-    embedder_net.load_state_dict(torch.load(model_path))
-    embedder_net.eval()
-    #print(embedder_net)
-    print("Model type: "+hp.model.type)
-
-    #Load data
-    print('==> reading data')
-    triplet_files = os.listdir(os.path.join(hp.data.test_path, hp.data.feat_type))
-    #triplets = np.load(os.path.join(hp.data.test_path, hp.data.feat_type, 'test_triplets.npy'),
-    #                   allow_pickle=True)
-    print("*number of test cases {}".format(len(triplet_files)))
-
-    print('==> computing scores')
-    scores, labels = [], []
-    counter = 0
-    for f in triplet_files:
-        t = np.load(os.path.join(hp.data.test_path, hp.data.feat_type, f), allow_pickle=True)
-        labels.append(t[0])
-        s1 = torch.Tensor(t[1]).unsqueeze(0)
-        s2 = torch.Tensor(t[2]).unsqueeze(0)
-        e1 = embedder_net(s1.cuda())
-        e2 = embedder_net(s2.cuda())
-        #normalize
-        e1 = e1 / torch.norm(e1, dim=1).unsqueeze(1)
-        e2 = e2 / torch.norm(e2, dim=1).unsqueeze(1)
-        #e1 = embedder_net(s1)
-        #e2 = embedder_net(s2)
-        scores.append(torch.dot(e1.squeeze(0), e2.squeeze(0)).item())
-        counter += 1
-        if counter % 1000 == 0:
-            print("*completed {} pairs ({})".format(counter, time.ctime()))
-    print("*completed {} pairs ({})".format(counter, time.ctime()))
-
-    #Compute EER
-    print('==> computing eer')
-    eer, thresh = calculate_eer(labels, np.array(scores))
-    print("\nEER : %0.4f (thres:%0.2f)"%(eer, thresh))
-    return eer, thresh
-
 
 if __name__=="__main__":
     if hp.training:
