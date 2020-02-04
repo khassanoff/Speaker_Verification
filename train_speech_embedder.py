@@ -99,16 +99,16 @@ def train(model_path):
                 ], lr=hp.train.lr, weight_decay=hp.train.wd)
     print(optimizer)
  
-    #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True,
-    #                factor=0.9, patience=hp.train.patience, threshold=0.0001)
-    scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=hp.train.lr*0.01,
-                    cycle_momentum=False, max_lr=hp.train.lr, step_size_up=5*len(train_loader),
-                    mode="triangular")
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True,
+                    factor=0.9, patience=hp.train.patience, threshold=0.0001)
+    #scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=hp.train.lr*0.01,
+    #                cycle_momentum=False, max_lr=hp.train.lr, step_size_up=5*len(train_loader),
+    #                mode="triangular")
     print(scheduler)
     
     iteration = 0
     for e in range(hp.train.epochs):
-        #step_decay(e, optimizer)
+        #step_decay(e, optimizer)       #stage based lr scheduler
         total_loss = 0
         for batch_id, (mel_db_batch, spk_id) in enumerate(train_loader):
             embedder_net.train()
@@ -125,7 +125,7 @@ def train(model_path):
             loss, _ = loss_fn(embeddings, spk_id) #wants (Speaker, Utterances, embedding)
             loss.backward()
             optimizer.step()
-            scheduler.step()    #uncomment for iteration based schedulers, eg. CycliclLR
+            #scheduler.step()    #uncomment for iteration based schedulers, eg. CycliclLR
             #print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
 
             total_loss = total_loss + loss
@@ -140,7 +140,7 @@ def train(model_path):
                     f.write(mesg)
                     
                 if (batch_id + 1) % (len(train_dataset)//hp.train.N) == 0:
-                    #scheduler.step(total_loss) # uncommenr for ReduceLROnPlateau scheduler
+                    scheduler.step(total_loss) # uncommenr for ReduceLROnPlateau scheduler
                     print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
         
       
