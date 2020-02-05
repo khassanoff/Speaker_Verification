@@ -32,14 +32,15 @@ def train(model_path):
     os.environ["CUDA_VISIBLE_DEVICES"] = str(hp.device) # for multiple gpus
     #device = torch.device("cuda:"+str(hp.device) if torch.cuda.is_available() else "cpu")
     #device = torch.device(hp.device)
- 
-    #checkpoint and log dir
-    os.makedirs(hp.train.checkpoint_dir, exist_ok=True)
-    log_file = "model" + hp.model.type + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
-                    + "_feat" + hp.data.feat_type + "_lr" + str(hp.train.lr) \
+    config_values = "model" + hp.model.type + "_proj" + str(hp.model.proj) + "_vlad" + str(hp.model.vlad_centers) \
+                    + "_ghost" + str(hp.model.ghost_centers) + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
+                    + "_dropout" + str(hp.model.dropout) + "_feat" + hp.data.feat_type + "_lr" + str(hp.train.lr) \
                     + "_optim" + hp.train.optim + "_loss" + hp.train.loss \
                     + "_wd" + str(hp.train.wd) + "_fr" + str(hp.data.tisv_frame) \
-                    + ".log"
+                    + "_patience" + str(hp.train.patience) + "_thrsh" + str(hp.train.threshold) + "_factor" + str(hp.train.factor) 
+    #checkpoint and log dir
+    os.makedirs(hp.train.checkpoint_dir, exist_ok=True)
+    log_file = config_values + ".log"
     log_file_path = os.path.join(hp.train.checkpoint_dir, log_file)
 
  
@@ -101,13 +102,14 @@ def train(model_path):
     print(optimizer)
  
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', verbose=True,
-                    factor=0.5, patience=hp.train.patience, threshold=0.0001)
+                    factor=hp.train.factor, patience=hp.train.patience, threshold=hp.train.threshold)
     #scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=hp.train.lr*0.01,
     #                cycle_momentum=False, max_lr=hp.train.lr, step_size_up=5*len(train_loader),
     #                mode="triangular")
     print(scheduler)
     
     iteration = 0
+    best_dev_acc = 0
     for e in range(hp.train.epochs):
         #step_decay(e, optimizer)       #stage based lr scheduler
         total_loss = 0
@@ -159,11 +161,18 @@ def train(model_path):
                 _, answer = loss_fn(embeddings, spk_id)
                 n_dev_correct += (torch.max(answer, 1)[1].view(spk_id.size()) == spk_id).sum().item()
         dev_acc = 100. * n_dev_correct / test_size
+        if dev_acc > best_dev_acc:
+            if hp.train.checkpoint_dir is not None:
+                best_dev_acc = dev_acc
+                ckpt_model_filename = config_values + '.pth'
+                ckpt_model_path = os.path.join(hp.train.checkpoint_dir, ckpt_model_filename)
+                torch.save(embedder_net.state_dict(), ckpt_model_path)
         scheduler.step(dev_acc) # uncommenr for ReduceLROnPlateau scheduler
         mesg = ("dev accuracy: {0:.8f}\n".format(dev_acc))
         print(mesg)
         with open(log_file_path, 'a') as f:
             f.write(mesg)
+        '''
         if hp.train.checkpoint_dir is not None and (e + 1) % hp.train.checkpoint_interval == 0:
             embedder_net.eval().cpu()
             ckpt_model_filename = "ckpt_epoch" + str(e+1) + "_batchID" + str(batch_id+1) \
@@ -175,7 +184,8 @@ def train(model_path):
                                     + "_wd" + str(hp.train.wd) + ".pth"
             ckpt_model_path = os.path.join(hp.train.checkpoint_dir, ckpt_model_filename)
             torch.save(embedder_net.state_dict(), ckpt_model_path)
-
+        '''
+        if (e + 1) % hp.train.test_interval == 0:
             eer, thresh = testVoxCelebOptim(ckpt_model_path)
             mesg = ("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
             mesg += ("learning rate: {0:.8f}\n".format(optimizer.param_groups[1]['lr']))

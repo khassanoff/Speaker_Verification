@@ -1,5 +1,5 @@
 training: !!bool "true"
-device: 1,2 #gpu id
+device: 0 #gpu id
 seed: 777
 ---
 data:
@@ -38,7 +38,9 @@ train:
     wd: 0.0001 #weight decay
     epochs: 100 #Max training epoch
     patience: 10
+    threshold: 0.0001
+    factor: 0.5
     log_interval: 100 #Iterations before printing progress
-    checkpoint_interval: 10 #Save model after x epochs
+    test_interval: 20 #test on sp. verification after test_interval epochs
     checkpoint_dir: './speech_id_checkpoint'
     restore: !!bool "false" #Resume training from previous model path
