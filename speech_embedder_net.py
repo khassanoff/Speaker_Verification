@@ -56,7 +56,6 @@ class SILoss(nn.Module):
 
     def forward(self, x, y):
         y = y.repeat_interleave(hp.train.M)
-        x = torch.reshape(x, (hp.train.N*hp.train.M, x.size(2)))
         x = self.linear(x)
         loss = F.cross_entropy(x, y)
         return loss, x
@@ -223,7 +222,6 @@ class Resnet34_VLAD(nn.Module):
         # ============================  
         x = self.dense(x)
         x = self.dropout(x)
-        
         #unit vector normalization
         #x = x / torch.norm(x, dim=1).unsqueeze(1)
 
