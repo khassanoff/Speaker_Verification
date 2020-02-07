@@ -13,7 +13,7 @@ import torch
 import pdb
 import numpy as np
 from torch.utils.data import DataLoader
-from utils import calculate_eer, step_decay
+from utils import calculate_eer, step_decay, extract_all_feat
 from tqdm import tqdm as tqdm
 from hparam import hparam as hp
 from data_load import VoxCeleb, VoxCeleb_utter
@@ -26,12 +26,9 @@ np.random.seed(hp.seed)
 random.seed(hp.seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
+os.environ["CUDA_VISIBLE_DEVICES"] =str(hp.device) # for multiple gpus
 
 def train(model_path):
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(hp.device) # for multiple gpus
-    #device = torch.device("cuda:"+str(hp.device) if torch.cuda.is_available() else "cpu")
-    #device = torch.device(hp.device)
     config_values = "model" + hp.model.type + "_proj" + str(hp.model.proj) + "_vlad" + str(hp.model.vlad_centers) \
                     + "_ghost" + str(hp.model.ghost_centers) + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                     + "_dropout" + str(hp.model.dropout) + "_feat" + hp.data.feat_type + "_lr" + str(hp.train.lr) \
@@ -42,8 +39,7 @@ def train(model_path):
     os.makedirs(hp.train.checkpoint_dir, exist_ok=True)
     log_file = config_values + ".log"
     log_file_path = os.path.join(hp.train.checkpoint_dir, log_file)
-
- 
+    
     #load model
     if hp.model.type.lower() == 'tresnet34':
         embedder_net = Resnet34_VLAD()
@@ -54,10 +50,6 @@ def train(model_path):
         embedder_net = torch.nn.DataParallel(embedder_net)
     embedder_net = embedder_net.cuda()
     print(embedder_net)
-
-    if hp.train.restore:
-        #resume training
-        embedder_net.load_state_dict(torch.load(model_path))
 
     if hp.train.loss.lower() == 'ge2e':
         #dataset
@@ -82,6 +74,11 @@ def train(model_path):
                                   num_workers=hp.train.num_workers, drop_last=True)
         loss_fn = HybridLoss(hp.model.proj, len(train_dataset)).cuda()
 
+        
+    if hp.train.restore:
+        embedder_net.load_state_dict(torch.load(os.path.join(hp.train.checkpoint_dir, model_path)))
+        loss_fn.load_state_dict(torch.load(os.path.join(hp.train.checkpoint_dir, "loss_" + model_path)))
+
     #Both net and loss have trainable parameters
 
     if hp.train.optim.lower() == 'sgd':
@@ -99,8 +96,8 @@ def train(model_path):
                     {'params': embedder_net.parameters()},
                     {'params': loss_fn.parameters()}
                 ], lr=hp.train.lr, weight_decay=hp.train.wd)
+        
     print(optimizer)
- 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', verbose=True,
                     factor=hp.train.factor, patience=hp.train.patience, threshold=hp.train.threshold)
     #scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=hp.train.lr*0.01,
@@ -122,8 +119,7 @@ def train(model_path):
                                                         mel_db_batch.size(3)))
             optimizer.zero_grad()
             embeddings = embedder_net(mel_db_batch)
-            embeddings = torch.reshape(embeddings, (hp.train.N, hp.train.M, embeddings.size(1)))
-
+            #embeddings = torch.reshape(embeddings, (hp.train.N, hp.train.M, embeddings.size(1)))
             #get loss, call backward, step optimizer
             loss, _ = loss_fn(embeddings, spk_id) #wants (Speaker, Utterances, embedding)
             loss.backward()
@@ -157,7 +153,7 @@ def train(model_path):
                 spk_id = spk_id.cuda()
                 dev_batch = torch.reshape(dev_batch, (hp.train.N*hp.train.M, dev_batch.size(2), dev_batch.size(3)))
                 embeddings = embedder_net(dev_batch)
-                embeddings = torch.reshape(embeddings, (hp.train.N*hp.train.M, 1, embeddings.size(1)))
+                #embeddings = torch.reshape(embeddings, (hp.train.N*hp.train.M, 1, embeddings.size(1)))
                 _, answer = loss_fn(embeddings, spk_id)
                 n_dev_correct += (torch.max(answer, 1)[1].view(spk_id.size()) == spk_id).sum().item()
         dev_acc = 100. * n_dev_correct / test_size
@@ -166,25 +162,15 @@ def train(model_path):
                 best_dev_acc = dev_acc
                 ckpt_model_filename = config_values + '.pth'
                 ckpt_model_path = os.path.join(hp.train.checkpoint_dir, ckpt_model_filename)
+                ckpt_loss_path = os.path.join(hp.train.checkpoint_dir, 'loss_'+ckpt_model_filename)
+                torch.save(loss_fn.state_dict(), ckpt_loss_path)
                 torch.save(embedder_net.state_dict(), ckpt_model_path)
         scheduler.step(dev_acc) # uncommenr for ReduceLROnPlateau scheduler
         mesg = ("dev accuracy: {0:.8f}\n".format(dev_acc))
         print(mesg)
         with open(log_file_path, 'a') as f:
             f.write(mesg)
-        '''
-        if hp.train.checkpoint_dir is not None and (e + 1) % hp.train.checkpoint_interval == 0:
-            embedder_net.eval().cpu()
-            ckpt_model_filename = "ckpt_epoch" + str(e+1) + "_batchID" + str(batch_id+1) \
-                                    + "_model" + hp.model.type \
-                                    + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
-                                    + "_feat" + hp.data.feat_type \
-                                    + "_lr" + str(hp.train.lr) + "_optim" + hp.train.optim \
-                                    + "_loss" + hp.train.loss \
-                                    + "_wd" + str(hp.train.wd) + ".pth"
-            ckpt_model_path = os.path.join(hp.train.checkpoint_dir, ckpt_model_filename)
-            torch.save(embedder_net.state_dict(), ckpt_model_path)
-        '''
+        
         if (e + 1) % hp.train.test_interval == 0:
             eer, thresh = testVoxCelebOptim(ckpt_model_path)
             mesg = ("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
@@ -195,23 +181,18 @@ def train(model_path):
 
     #save model
     embedder_net.eval().cpu()
-    save_model_filename = "final_epoch" + str(e+1) + "_batchID" + str(batch_id+1) \
-                            + "_model" + hp.model.type \
-                            + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
-                            + "_feat" + hp.data.feat_type \
-                            + "_lr" + str(hp.train.lr) + "_optim" + hp.train.optim \
-                            + "_loss" + hp.train.loss \
-                            + "_wd" + str(hp.train.wd) + ".pth"
-
+    save_model_filename = "final_epoch_" + config_values + ".pth"
+    
     save_model_path = os.path.join(hp.train.checkpoint_dir, save_model_filename)
     torch.save(embedder_net.state_dict(), save_model_path)
-
+    ckpt_loss_path = os.path.join(hp.train.checkpoint_dir, 'loss_'+save_model_filename)
+    torch.save(loss_fn.state_dict(), ckpt_loss_path)
     print("\nDone, trained model saved at", save_model_path)
     testVoxCelebOptim(save_model_path)
 
 
 def testVoxCelebOptim(model_path):
-    os.environ["CUDA_VISIBLE_DEVICES"] =str(hp.device) # for multiple gpus
+    model_path = os.path.join(hp.train.checkpoint_dir, model_path)
     print('==> calculating test({}) data lists...'.format(os.path.join(hp.data.test_path,
                                                                        hp.data.feat_type)))
     #Load model
@@ -220,9 +201,7 @@ def testVoxCelebOptim(model_path):
         embedder_net = Resnet34_VLAD()
     elif hp.model.type.lower() == 'rnn':
         embedder_net = SpeechEmbedder()
-        
-    if torch.cuda.device_count() > 1:
-        embedder_net = torch.nn.DataParallel(embedder_net)
+    embedder_net = torch.nn.DataParallel(embedder_net)
     embedder_net = embedder_net.cuda()
     embedder_net.load_state_dict(torch.load(model_path))
     embedder_net.eval()
@@ -257,10 +236,38 @@ def testVoxCelebOptim(model_path):
     eer, thresh = calculate_eer(labels, np.array(scores))
     print("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
     return eer, thresh
-    
 
+
+def testJusanBank(p1, p2, model_path):
+    model_path = os.path.join(hp.train.checkpoint_dir, model_path)
+
+    embedder_net = Resnet34_VLAD()
+    embedder_net = torch.nn.DataParallel(embedder_net)
+    embedder_net = embedder_net.cuda()
+    embedder_net.load_state_dict(torch.load(model_path))
+    embedder_net.eval()
+    print('==> transforming wav to spec')
+    s1 = extract_all_feat(p1, mode = 'test').transpose()    #dim: time, spec
+    s2 = extract_all_feat(p2, mode = 'test').transpose()
+    s1 = torch.Tensor(s1).unsqueeze(0)
+    s2 = torch.Tensor(s2).unsqueeze(0)
+    print('==> computing vectors')
+    e1 = embedder_net(s1.cuda())
+    e2 = embedder_net(s2.cuda())
+    e1 = e1 / torch.norm(e1, dim=1).unsqueeze(1)
+    e2 = e2 / torch.norm(e2, dim=1).unsqueeze(1)
+    score = torch.dot(e1.squeeze(0), e2.squeeze(0)).item()
+    print(score)
+    return score
+    #print('==> computing eer')
+    #eer, thresh = calculate_eer(labels, np.array([score]))
+    #print("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
+    
+    
+    
 if __name__=="__main__":
     if hp.training:
         train(hp.model.model_path)
     else:
         testVoxCelebOptim(hp.model.model_path)
+        testJusanBank(hp.data.p1, hp.data.p2, hp.model.model_path)

@@ -1,8 +1,10 @@
-training: !!bool "true"
-device: 0 #gpu id
+training: !!bool "false"
+device: 4,7 #gpu id
 seed: 777
 ---
 data:
+    p1: '/raid/ykhassanov/datasets/JusanBank/wav/id1/ch2rec0_clean.wav'
+    p2: '/raid/ykhassanov/datasets/JusanBank/wav/id40/ch2rec1_clean.wav'
     train_path: './dataVoxCeleb1/Audio/dev/processed'
     train_path_unprocessed: './dataVoxCeleb1/Audio/dev/wav' #*/wav/speaker_id/session_id/file.wav
     test_meta_path: './dataVoxCeleb1/Metadata/veri_test.txt'
@@ -25,7 +27,7 @@ model:
     vlad_centers: 10
     dropout: 0.0
     #Model path for testing, inference, or resuming training
-    model_path: './speech_id_checkpoint/ckpt_epoch600_batchID151_modelTResNet34_spk8_utt8_featspec_lr0.1_optimAdadelta_lossge2e.pth'
+    model_path: 'temp_modelTResNet34_proj512_vlad10_ghost0_spk256_utt1_dropout0.0_featspec_lr0.001_optimAdam_losssi_wd0.0001_fr250_patience10_thrsh0.0001_factor0.5.pth'
 ---
 train:
     N: 256 #Number of speakers in batch
@@ -36,11 +38,11 @@ train:
     loss: 'si' #loss type: "si" (Speaker identification), 'ge2e' (generaliazed E2E loss), 'hybrid'
     warmup_epochs: 1 #number of warmup epochs with lr set to lr/10
     wd: 0.0001 #weight decay
-    epochs: 100 #Max training epoch
+    epochs: 250 #Max training epoch
     patience: 10
     threshold: 0.0001
     factor: 0.5
     log_interval: 100 #Iterations before printing progress
-    test_interval: 20 #test on sp. verification after test_interval epochs
+    test_interval: 1 #test on sp. verification after test_interval epochs
     checkpoint_dir: './speech_id_checkpoint'
-    restore: !!bool "false" #Resume training from previous model path
+    restore: !!bool "true" #Resume training from previous model path
