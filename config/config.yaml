@@ -1,4 +1,4 @@
-training: !!bool "false"
+training: !!bool "true"
 device: 4,7 #gpu id
 seed: 777
 ---
@@ -7,8 +7,8 @@ data:
     p2: '/raid/ykhassanov/datasets/JusanBank/wav/id40/ch2rec1_clean.wav'
     train_path: './dataVoxCeleb1/Audio/dev/processed'
     train_path_unprocessed: './dataVoxCeleb1/Audio/dev/wav' #*/wav/speaker_id/session_id/file.wav
-    test_meta_path: './dataVoxCeleb1/Metadata/veri_test.txt'
-    test_path: './dataVoxCeleb1/Audio/test/processed'
+    test_meta_path: '/raid/ykhassanov/datasets/JusanBank/jusan_test_full_gender.txt'
+    test_path: '/raid/ykhassanov/datasets/JusanBank/wav'
     test_path_unprocessed: './dataVoxCeleb1/Audio/test/wav'
     feat_type: 'spec' #feature type: 'spec' (spectogram), 'logmel' (logmel spectogram)
     sr: 16000
@@ -27,7 +27,7 @@ model:
     vlad_centers: 10
     dropout: 0.0
     #Model path for testing, inference, or resuming training
-    model_path: 'temp_modelTResNet34_proj512_vlad10_ghost0_spk256_utt1_dropout0.0_featspec_lr0.001_optimAdam_losssi_wd0.0001_fr250_patience10_thrsh0.0001_factor0.5.pth'
+    model_path: 'adamwmodelTResNet34_proj512_vlad10_ghost0_spk256_utt1_dropout0.0_featspec_lr0.001_optimAdam_losssi_wd0.0001_fr250_patience10_thrsh0.0001_factor0.5.pth'
 ---
 train:
     N: 256 #Number of speakers in batch
@@ -43,6 +43,6 @@ train:
     threshold: 0.0001
     factor: 0.5
     log_interval: 100 #Iterations before printing progress
-    test_interval: 1 #test on sp. verification after test_interval epochs
+    test_interval: 10 #test on sp. verification after test_interval epochs
     checkpoint_dir: './speech_id_checkpoint'
-    restore: !!bool "true" #Resume training from previous model path
+    restore: !!bool "false" #Resume training from previous model path
