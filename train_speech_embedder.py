@@ -60,12 +60,8 @@ def train(model_path):
     elif hp.train.loss.lower() == 'si':
         #dataset
         train_dataset = VoxCeleb_utter()
-        train_size = int(0.9 * len(train_dataset))
-        test_size = len(train_dataset) - train_size
-        train_dt, test_dt = torch.utils.data.random_split(train_dataset, [train_size, test_size])
-        train_loader = DataLoader(train_dt, batch_size=hp.train.N, shuffle=True,
+        train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
                                   num_workers=hp.train.num_workers, drop_last=True)
-        test_loader = DataLoader(test_dt, batch_size=hp.train.N, num_workers=hp.train.num_workers, drop_last=True)
         loss_fn = SILoss(hp.model.proj, train_dataset.num_of_spk).cuda()
     elif hp.train.loss.lower() == 'hybrid':
         #dataset
@@ -146,49 +142,46 @@ def train(model_path):
         # switch model to evaluation mode
         embedder_net.eval()
         # calculate accuracy on validation set
-        n_dev_correct = 0
+        eer_low = 100
         with torch.no_grad():
-            for dev_batch_idx, (dev_batch, spk_id) in enumerate(test_loader):
-                dev_batch = dev_batch.cuda()
-                spk_id = spk_id.cuda()
-                dev_batch = torch.reshape(dev_batch, (hp.train.N*hp.train.M, dev_batch.size(2), dev_batch.size(3)))
-                embeddings = embedder_net(dev_batch)
-                #embeddings = torch.reshape(embeddings, (hp.train.N*hp.train.M, 1, embeddings.size(1)))
-                _, answer = loss_fn(embeddings, spk_id)
-                n_dev_correct += (torch.max(answer, 1)[1].view(spk_id.size()) == spk_id).sum().item()
-        dev_acc = 100. * n_dev_correct / test_size
-        if dev_acc > best_dev_acc:
+            verify_list = np.loadtxt(hp.data.test_meta_path, str)
+            list1 = np.array([i[1] for i in verify_list])
+            list2 = np.array([i[2] for i in verify_list])
+            total_list = np.concatenate((list1, list2))
+            unique_list = np.unique(total_list, return_index=True)
+            vectors = {}
+            counter = 0
+            for index, wav_file in enumerate(unique_list[0]):
+                spec = np.load(os.path.join(hp.data.test_path, wav_file.strip('.wav') +'.npy'), allow_pickle=True)
+                s1 = torch.Tensor(spec).unsqueeze(0)
+                e1 = embedder_net(s1.cuda())
+                vectors[wav_file] = e1.cpu().detach()
+        
+            scores, labels = [], []
+            for (label, el1, el2) in verify_list:
+                labels.append(int(label))
+                e1 = vectors[el1]
+                e2 = vectors[el2]
+                e1 = e1 / torch.norm(e1, dim=1).unsqueeze(1)
+                e2 = e2 / torch.norm(e2, dim=1).unsqueeze(1)
+                scores.append(torch.dot(e1.squeeze(0), e2.squeeze(0)).item())
+            print('==> computing eer')
+            eer, thresh = calculate_eer(labels, np.array(scores))
+
+        if eer < eer_low:
             if hp.train.checkpoint_dir is not None:
-                best_dev_acc = dev_acc
+                eer_low = eer
                 ckpt_model_filename = config_values + '.pth'
                 ckpt_model_path = os.path.join(hp.train.checkpoint_dir, ckpt_model_filename)
                 ckpt_loss_path = os.path.join(hp.train.checkpoint_dir, 'loss_'+ckpt_model_filename)
                 torch.save(loss_fn.state_dict(), ckpt_loss_path)
                 torch.save(embedder_net.state_dict(), ckpt_model_path)
-        scheduler.step(dev_acc) # uncommenr for ReduceLROnPlateau scheduler
-        mesg = ("dev accuracy: {0:.8f}\n".format(dev_acc))
+        scheduler.step(eer) # uncommenr for ReduceLROnPlateau scheduler
+        mesg = ("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
+        mesg += ("learning rate: {0:.8f}\n".format(optimizer.param_groups[1]['lr']))
         print(mesg)
         with open(log_file_path, 'a') as f:
             f.write(mesg)
-        
-        if (e + 1) % hp.train.test_interval == 0:
-            eer, thresh = testVoxCelebOptim(ckpt_model_path)
-            mesg = ("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
-            mesg += ("learning rate: {0:.8f}\n".format(optimizer.param_groups[1]['lr']))
-            with open(log_file_path, 'a') as f:
-                f.write(mesg)
-            embedder_net.train().cuda()
-
-    #save model
-    embedder_net.eval().cpu()
-    save_model_filename = "final_epoch_" + config_values + ".pth"
-    
-    save_model_path = os.path.join(hp.train.checkpoint_dir, save_model_filename)
-    torch.save(embedder_net.state_dict(), save_model_path)
-    ckpt_loss_path = os.path.join(hp.train.checkpoint_dir, 'loss_'+save_model_filename)
-    torch.save(loss_fn.state_dict(), ckpt_loss_path)
-    print("\nDone, trained model saved at", save_model_path)
-    testVoxCelebOptim(save_model_path)
 
 
 def testVoxCelebOptim(model_path):
@@ -269,5 +262,5 @@ if __name__=="__main__":
     if hp.training:
         train(hp.model.model_path)
     else:
-        testVoxCelebOptim(hp.model.model_path)
+        #testVoxCelebOptim(hp.model.model_path)
         testJusanBank(hp.data.p1, hp.data.p2, hp.model.model_path)
