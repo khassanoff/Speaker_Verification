@@ -101,7 +101,6 @@ def train(model_path):
     #print(scheduler)
     
     iteration = 0
-    best_dev_acc = 0
     eer_low = 100
     for e in range(hp.train.epochs):
         step_decay(e, optimizer)       #stage based lr scheduler
