@@ -1,10 +1,10 @@
-training: !!bool "true"
+training: !!bool "false"
 device: 4,7 #gpu id
 seed: 777
 ---
 data:
-    p1: '/raid/ykhassanov/datasets/JusanBank/wav/id1/ch2rec0_clean.wav'
-    p2: '/raid/ykhassanov/datasets/JusanBank/wav/id40/ch2rec1_clean.wav'
+    p1: './data/id_02542_00057.wav'
+    p2: './data/id_00017_00043.wav'
     train_path: './dataVoxCeleb1/Audio/dev/processed'
     train_path_unprocessed: './dataVoxCeleb1/Audio/dev/wav' #*/wav/speaker_id/session_id/file.wav
     test_meta_path: '/raid/ykhassanov/datasets/JusanBank/jusan_test_full_gender.txt'
@@ -27,7 +27,7 @@ model:
     vlad_centers: 10
     dropout: 0.0
     #Model path for testing, inference, or resuming training
-    model_path: 'adamwmodelTResNet34_proj512_vlad10_ghost0_spk256_utt1_dropout0.0_featspec_lr0.001_optimAdam_losssi_wd0.0001_fr250_patience10_thrsh0.0001_factor0.5.pth'
+    model_path: 'modelTResNet34_proj512_vlad10_ghost0_spk256_utt1_dropout0.0_featspec_lr0.001_optimAdam_losssi_wd0.0001_fr250_patience10_thrsh0.0001_factor0.5.pth'
 ---
 train:
     N: 256 #Number of speakers in batch
