@@ -42,6 +42,7 @@ class GE2ELoss(nn.Module):
         self.b = nn.Parameter(torch.tensor(-5.0), requires_grad=True).cuda()
 
     def forward(self, embeddings, y=None):
+        #pdb.set_trace()
         torch.clamp(self.w, 1e-6)
         centroids = get_centroids(embeddings)
         cossim = get_cossim(embeddings, centroids)

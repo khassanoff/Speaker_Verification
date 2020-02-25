@@ -11,6 +11,7 @@ import torch
 import torch.autograd as grad
 import torch.nn.functional as F
 import pdb
+from scipy.signal import lfilter, cheby2
 
 from hparam import hparam as hp
 
@@ -106,10 +107,19 @@ def load_feat(np_file, mode = 'train'):
 
     return spec
 
+def cheby_bandpass_filter(data, lowcut, highcut, fs, order=5):
+    b, a = cheby2(order, 20, [lowcut, highcut], btype='bandpass', fs=fs)
+    y = lfilter(b, a, data)
+    return y
 
 def extract_all_feat(wav_file, mode = 'train'):
     #extract and save features
-    sound_file, _ = librosa.core.load(wav_file, sr=hp.data.sr)
+    sound_file, _ = librosa.core.load(wav_file, hp.data.sr)
+    if hp.data.feat_type=='spec_sr_tel': 
+        fs = hp.data.sr
+        lowcut = 500.0
+        highcut = 5000.0
+        sound_file = cheby_bandpass_filter(sound_file, lowcut, highcut, fs)
     window_length = int(hp.data.window*hp.data.sr)
     hop_length = int(hp.data.hop*hp.data.sr)
 
@@ -118,9 +128,8 @@ def extract_all_feat(wav_file, mode = 'train'):
     #else:
     #    sound_file = np.append(sound_file, sound_file[::-1])
     sound_file = np.append(sound_file, sound_file[::-1])
-
     spec = librosa.stft(np.asfortranarray(sound_file), n_fft=hp.data.nfft, hop_length=hop_length,
-                        win_length=window_length)
+                        win_length=400)
     spec = np.abs(spec)  # energy
 
     mu = np.mean(spec, 0, keepdims=True)

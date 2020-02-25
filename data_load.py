@@ -68,8 +68,9 @@ class VoxCeleb_utter(Dataset):
     def __init__(self, shuffle=True, utter_start=0):
         # data path
         self.path = os.path.join(hp.data.train_path, hp.data.feat_type)
-        self.num_of_spk = len(os.listdir(self.path))
-        self.utt_list = glob.glob(self.path+'/*/*')
+        #self.path2 = os.path.join(hp.data.train_path, 'spec_tel')
+        self.num_of_spk = len(os.listdir(self.path)) #+ len(os.listdir(self.path2)) 
+        self.utt_list = glob.glob(self.path+'/*/*') #+ glob.glob(self.path2+'/*/*')
         self.utter_start = utter_start
         
     def __len__(self):

@@ -1,22 +1,22 @@
 training: !!bool "true"
-device: 4,7 #gpu id
+device: 7,8,9 #gpu id
 seed: 777
 ---
 data:
     p1: '/raid/ykhassanov/datasets/JusanBank/wav/id1/ch2rec0_clean.wav'
     p2: '/raid/ykhassanov/datasets/JusanBank/wav/id40/ch2rec1_clean.wav'
-    train_path: './dataVoxCeleb1/Audio/dev/processed'
-    train_path_unprocessed: './dataVoxCeleb1/Audio/dev/wav' #*/wav/speaker_id/session_id/file.wav
-    test_meta_path: '/raid/ykhassanov/datasets/JusanBank/jusan_test_full_gender.txt'
-    test_path: '/raid/ykhassanov/datasets/JusanBank/wav'
-    test_path_unprocessed: './dataVoxCeleb1/Audio/test/wav'
+    train_path: './dataVoxCeleb2/Audio/dev_wav/processed'
+    train_path_unprocessed: './dataVoxCeleb1/Audio/dev/noise_wav' #*/wav/speaker_id/session_id/file.wav
+    test_meta_path: './dataJusanBank/jusan_test_full_gender.txt'
+    test_path: './dataJusanBank/wav'
+    test_path_unprocessed: './dataVoxCeleb2/Audio/test_wav/aac'
     feat_type: 'spec' #feature type: 'spec' (spectogram), 'logmel' (logmel spectogram)
     sr: 16000
     nfft: 512 #For mel spectrogram preprocess
     window: 0.025 #(s)
     hop: 0.01 #(s)
     nmels: 40 #Number of mel energies
-    tisv_frame: 250 #Max number of time steps/frames in input after preprocess
+    tisv_frame: 400 #Max number of time steps/frames in input after preprocess
 ---
 model:
     type: 'TResNet34' #model type: 'TResNet32' (Thin ResNet34), 'RNN'
@@ -27,19 +27,19 @@ model:
     vlad_centers: 10
     dropout: 0.0
     #Model path for testing, inference, or resuming training
-    model_path: 'adamwmodelTResNet34_proj512_vlad10_ghost0_spk256_utt1_dropout0.0_featspec_lr0.001_optimAdam_losssi_wd0.0001_fr250_patience10_thrsh0.0001_factor0.5.pth'
+    model_path: 'modelTResNet34_proj512_vlad10_ghost0_spk256_utt1_dropout0.0_featspec_lr0.001_optimAdam_losssi_wd0.0001_fr400_patience10_thrsh0.0001_factor0.5.pth'
 ---
 train:
     N: 256 #Number of speakers in batch
     M: 1 #Number of utterances per speaker
-    num_workers: 0 #number of workers for dataloader
+    num_workers: 16 #number of workers for dataloader
     lr: 0.001
     optim: 'Adam' #optimizer type: 'Adam' (lr 0.001), 'SGD', 'Adadelta' (lr 0.1)
     loss: 'si' #loss type: "si" (Speaker identification), 'ge2e' (generaliazed E2E loss), 'hybrid'
     warmup_epochs: 1 #number of warmup epochs with lr set to lr/10
     wd: 0.0001 #weight decay
-    epochs: 250 #Max training epoch
-    patience: 10
+    epochs: 128 #Max training epoch
+    patience: 50
     threshold: 0.0001
     factor: 0.5
     log_interval: 100 #Iterations before printing progress
