@@ -1,11 +1,11 @@
-training: !!bool "false"
-device: 4,7 #gpu id
+training: !!bool "true"
+device: 12, 13 #gpu id
 seed: 777
 ---
 data:
     p1: './data/id_02542_00057.wav'
     p2: './data/id_00017_00043.wav'
-    train_path: './dataVoxCeleb1/Audio/dev/processed'
+    train_path: './dataVoxCeleb2/Audio/dev_wav/processed'
     train_path_unprocessed: './dataVoxCeleb1/Audio/dev/wav' #*/wav/speaker_id/session_id/file.wav
     test_meta_path: '/raid/ykhassanov/datasets/JusanBank/jusan_test_full_gender.txt'
     test_path: '/raid/ykhassanov/datasets/JusanBank/wav'
@@ -16,21 +16,21 @@ data:
     window: 0.025 #(s)
     hop: 0.01 #(s)
     nmels: 40 #Number of mel energies
-    tisv_frame: 400 #Max number of time steps/frames in input after preprocess
+    tisv_frame: 250 #Max number of time steps/frames in input after preprocess
 ---
 model:
     type: 'TResNet34' #model type: 'TResNet32' (Thin ResNet34), 'RNN'
     hidden: 768 #Number of LSTM hidden layer units
     num_layer: 3 #Number of LSTM layers
     proj: 512 #Embedding size
-    ghost_centers: 0
-    vlad_centers: 10
+    ghost_centers: 2
+    vlad_centers: 8
     dropout: 0.0
     #Model path for testing, inference, or resuming training
-    model_path: 'modelTResNet34_proj512_vlad10_ghost0_spk256_utt1_dropout0.0_featspec_lr0.001_optimAdam_losssi_wd0.0001_fr250_patience10_thrsh0.0001_factor0.5.pth'
+    model_path: 'modelTResNet34_proj512_vlad10_ghost0_spk256_utt1_dropout0.0_featspec_lr0.001_optimAdam_losssi_wd0.0001_fr400_patience10_thrsh0.0001_factor0.5.pth'
 ---
 train:
-    N: 256 #Number of speakers in batch
+    N: 160 #Number of speakers in batch
     M: 1 #Number of utterances per speaker
     num_workers: 16 #number of workers for dataloader
     lr: 0.001

@@ -5,7 +5,7 @@ Created on Wed Sep  5 21:49:16 2018
 
 @author: harry
 """
-
+from __future__ import division
 import os
 import random
 import time
@@ -29,7 +29,35 @@ torch.backends.cudnn.benchmark = False
 os.environ["CUDA_VISIBLE_DEVICES"] =str(hp.device) # for multiple gpus
 
 def train(model_path):
-    config_values = "step_decay_model" + hp.model.type + "_proj" + str(hp.model.proj) + "_vlad" + str(hp.model.vlad_centers) \
+    total = []
+    path1 = '/raid/saida.mussakhojayeva/projects/SEAME/dev_sge/text_lang.txt'
+    path2 = '/raid/saida.mussakhojayeva/projects/SEAME/dev_man/text_lang.txt'
+    path3 = '/raid/saida.mussakhojayeva/projects/SEAME/train/text_lang.txt'
+    for path in [path1, path2, path3]:
+        with open(path, 'r') as f:
+            total += f.readlines()
+    all_perm = []
+    pos_en, pos_cn, pos_diff = 0, 0, 0
+    print('preparing test set')
+    for i, line1 in tqdm(enumerate(total)):
+        line1 = line1.strip().split()
+        utt_id1, start1, end1, utt1, lang1 = line1[0], line1[1], line1[2], line1[3:-1], line1[-1]
+        spk_id1 = utt_id1.split('-')[0]
+        for line2 in total[(i+1):]:
+            line2 = line2.strip().split()
+            utt_id2, start2, end2, utt2, lang2 = line2[0], line2[1], line2[2], line2[3:-1], line2[-1]
+            spk_id2 = utt_id2.split('-')[0]
+            if lang1==lang2:
+                if lang1=='EN':lang_label = 0
+                elif lang1=='CN':lang_label = 1
+            else: lang_label = 2
+            if spk_id1==spk_id2: label = 1
+            else:label = 0
+            instance = [label, utt_id1, start1, end1, utt_id2, start2, end2, lang_label," ".join(utt1), " ".join(utt2)]
+            all_perm.append(instance)               
+    print('loaded all permutation cases')
+    
+    config_values = "toy_model" + hp.model.type + "_proj" + str(hp.model.proj) + "_vlad" + str(hp.model.vlad_centers) \
                     + "_ghost" + str(hp.model.ghost_centers) + "_spk" + str(hp.train.N) + "_utt" + str(hp.train.M) \
                     + "_dropout" + str(hp.model.dropout) + "_feat" + hp.data.feat_type + "_lr" + str(hp.train.lr) \
                     + "_optim" + hp.train.optim + "_loss" + hp.train.loss \
@@ -138,53 +166,101 @@ def train(model_path):
                     #scheduler.step(total_loss) # uncommenr for ReduceLROnPlateau scheduler
                     print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
         
-      
-        # switch model to evaluation mode
-        embedder_net.eval()
-        # calculate accuracy on validation set
-        with torch.no_grad():
-            verify_list = np.loadtxt(hp.data.test_meta_path, str)
-            list1 = np.array([i[1] for i in verify_list])
-            list2 = np.array([i[2] for i in verify_list])
-            total_list = np.concatenate((list1, list2))
-            unique_list = np.unique(total_list, return_index=True)
-            vectors = {}
-            counter = 0
-            for index, wav_file in enumerate(unique_list[0]):
-                spec = np.load(os.path.join(hp.data.test_path, wav_file.strip('.wav') +'.npy'), allow_pickle=True)
-                s1 = torch.Tensor(spec).unsqueeze(0)
-                e1 = embedder_net(s1.cuda())
-                vectors[wav_file] = e1.cpu().detach()
-
-            scores, labels = [], []
-            for (label, el1, el2) in verify_list:
-                labels.append(int(label))
-                e1 = vectors[el1]
-                e2 = vectors[el2]
-                e1 = e1 / torch.norm(e1, dim=1).unsqueeze(1)
-                e2 = e2 / torch.norm(e2, dim=1).unsqueeze(1)
-                scores.append(torch.dot(e1.squeeze(0), e2.squeeze(0)).item())
-            print('==> computing eer')
-            eer, thresh = calculate_eer(labels, np.array(scores))
-
-            if eer < eer_low:
-                mesg = ("\n new EER : %0.4f\n"%(eer))
+        if (e+1)%2==0: 
+            #(e+1)%2==0 
+            # switch model to evaluation mode
+            embedder_net.eval()
+            # calculate accuracy on validation set
+            with torch.no_grad():
+                root = "/raid/saida.mussakhojayeva/datasets/seame/"
+                vectors = {}
+                print('calculating embeddings')
+                for index, instance in enumerate(total):
+                    if '03nc06fay_0101' in instance: continue #corrupted file
+                    instance = instance.split()
+                    utt_id = "-".join(instance[0].split("-")[1:-2])
+                    if "ni" in utt_id: utt_type='interview/'
+                    elif "nc" in utt_id: utt_type = 'conversation/'
+                    utt_path = root + utt_type + utt_id + "/" + "-".join(instance[0].split("-")[1:])
+                    spec = np.load(utt_path+'.npy', allow_pickle=True)
+                    s1 = torch.Tensor(spec).unsqueeze(0)
+                    e1 = embedder_net(s1.cuda())
+                    vectors[instance[0]] = e1.cpu().detach()
+                print('computed all embeddings')
+                scores, labels = [], []
+                for instance in all_perm:
+                    if '03nc06fay_0101' in instance[4] or'03nc06fay_0101' in instance[1] : continue #corrupted file
+                    label = instance[0]
+                    labels.append(int(label))
+                    el1, el2 = instance[1], instance[4]
+                    e1 = vectors[el1]
+                    e2 = vectors[el2]
+                    e1 = e1 / torch.norm(e1, dim=1).unsqueeze(1)
+                    e2 = e2 / torch.norm(e2, dim=1).unsqueeze(1)
+                    score = torch.dot(e1.squeeze(0), e2.squeeze(0)).item()
+                    scores.append(score)
+                print('==> computing eer')
+                eer, thresh = calculate_eer(labels, np.array(scores))
+                tp_en, fn_en, tn_en, fp_en = 0, 0, 0, 0
+                tp_cn, fn_cn, tn_cn, fp_cn = 0, 0, 0, 0
+                tp_diff, fn_diff, tn_diff, fp_diff = 0, 0, 0, 0
+                for instance in all_perm:
+                    lang = instance[7] # 0-en 1-cn 2-diff
+                    if '03nc06fay_0101' in instance[4] or'03nc06fay_0101' in instance[1] : continue #corrupted file
+                    label = int(instance[0])
+                    if score > thresh:
+                        pred = 1
+                    else: pred = 0
+                    if pred != label:
+                        if pred==0: 
+                            if lang==0: fn_en+=1
+                            elif lang==1: fn_cn+=1
+                            elif lang==2: fn_diff+=1    
+                            #print('INCORRECT', len(instance[7].split()), len(instance[8].split()))
+                        else: 
+                            if lang==0: fp_en+=1
+                            elif lang==1: fp_cn+=1
+                            elif lang==2: fp_diff+=1
+                    else:
+                        if pred==0:
+                            if lang==0: tn_en+=1
+                            elif lang==1: tn_cn+=1
+                            elif lang==2: tn_diff+=1
+                        else:
+                            if lang==0: tp_en+=1
+                            elif lang==1: tp_cn+=1
+                            elif lang==2: tp_diff+=1
+                recall_en =  tp_en/(tp_en+fn_en)
+                recall_cn = tp_cn/(tp_cn+fn_cn)
+                recall_diff = tp_diff/(tp_diff+fn_diff)
+                mesg = 'ENGLISH EXAMPLES: {0}, {1}, {2}, {3} '.format(tp_en, fn_en, tn_en, fp_en)
+                mesg += ('(recall: %0.4f )\n'%recall_en)
+                mesg += 'CHINESE EXAMPLES: {0}, {1}, {2}, {3} '.format(tp_cn, fn_cn, tn_cn, fp_cn)
+                mesg += ('(recall: %0.4f )\n'%recall_cn)
+                mesg += 'DIFF EXAMPLES: {0}, {1}, {2}, {3} '.format(tp_diff, fn_diff, tn_diff, fp_diff)
+                mesg += ('(recall: %0.4f )\n'%recall_diff)
                 print(mesg)
                 with open(log_file_path, 'a') as f:
                     f.write(mesg)
-                if hp.train.checkpoint_dir is not None:
-                    eer_low = eer
-                    ckpt_model_filename = config_values + '.pth'
-                    ckpt_model_path = os.path.join(hp.train.checkpoint_dir, ckpt_model_filename)
-                    ckpt_loss_path = os.path.join(hp.train.checkpoint_dir, 'loss_'+ckpt_model_filename)
-                    torch.save(loss_fn.state_dict(), ckpt_loss_path)
-                    torch.save(embedder_net.state_dict(), ckpt_model_path)
-            #scheduler.step(eer) # uncommenr for ReduceLROnPlateau scheduler
-            mesg = ("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
-            mesg += ("learning rate: {0:.8f}\n".format(optimizer.param_groups[1]['lr']))
-            print(mesg)
-            with open(log_file_path, 'a') as f:
-                f.write(mesg)
+
+                if eer < eer_low:
+                    mesg = ("\n new EER : %0.4f\n"%(eer))
+                    print(mesg)
+                    with open(log_file_path, 'a') as f:
+                        f.write(mesg)
+                    if hp.train.checkpoint_dir is not None:
+                        eer_low = eer
+                        ckpt_model_filename = config_values + '.pth'
+                        ckpt_model_path = os.path.join(hp.train.checkpoint_dir, ckpt_model_filename)
+                        ckpt_loss_path = os.path.join(hp.train.checkpoint_dir, 'loss_'+ckpt_model_filename)
+                        torch.save(loss_fn.state_dict(), ckpt_loss_path)
+                        torch.save(embedder_net.state_dict(), ckpt_model_path)
+                #scheduler.step(eer) # uncommenr for ReduceLROnPlateau scheduler
+                mesg = ("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
+                mesg += ("learning rate: {0:.8f}\n".format(optimizer.param_groups[1]['lr']))
+                print(mesg)
+                with open(log_file_path, 'a') as f:
+                    f.write(mesg)
 
 
 def testVoxCelebOptim(model_path):

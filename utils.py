@@ -112,9 +112,9 @@ def cheby_bandpass_filter(data, lowcut, highcut, fs, order=5):
     y = lfilter(b, a, data)
     return y
 
-def extract_all_feat(wav_file, mode = 'train'):
+def extract_all_feat(wav_file, mode = 'train', offset=0.0, duration=None):
     #extract and save features
-    sound_file, _ = librosa.core.load(wav_file, hp.data.sr)
+    sound_file, _ = librosa.core.load(wav_file, hp.data.sr, offset=offset, duration=duration)
     if hp.data.feat_type=='spec_sr_tel': 
         fs = hp.data.sr
         lowcut = 500.0
