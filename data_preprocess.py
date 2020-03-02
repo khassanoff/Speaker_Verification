@@ -24,20 +24,11 @@ def save_spectrogram_tisv_train():
         print("%dth speaker processing..."%i)
         os.makedirs(os.path.join(hp.data.train_path, hp.data.feat_type, "speaker%d"%i), \
                     exist_ok=True)
-        #utts_spec = {}
         for j, utter_name in enumerate(glob.glob(folder+'/*/*')):
             if utter_name[-4:] == '.wav':
-                #The Oxford Uni's way
-                #S = extract_feat(utter_name, mode = 'Train')
                 S = extract_all_feat(utter_name, mode = 'train')
-                #utts_spec.append(S)
-                #utts_spec[j]=S.tolist()
                 np.save(os.path.join(hp.data.train_path, hp.data.feat_type, "speaker%d"%i, \
                                      "utt%d.npy"%j), S)
-
-        #utts_spec = np.array(utts_spec)
-        #print(utts_spec.shape)
-        #np.save(os.path.join(hp.data.train_path, hp.data.feat_type, "speaker%d.npy"%i), utts_spec)
 
 
 def save_spectrogram_tisv_test():
@@ -71,6 +62,6 @@ def save_spectrogram_tisv_test():
 
 
 if __name__ == "__main__":
-    #save_spectrogram_tisv_train()
+    save_spectrogram_tisv_train()
     save_spectrogram_tisv_test()
 
