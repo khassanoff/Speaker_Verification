@@ -11,9 +11,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import pdb
-
 from hparam import hparam as hp
 from utils import get_centroids, get_cossim, calc_loss
+
 
 class SpeechEmbedder(nn.Module):
     def __init__(self):
@@ -53,13 +53,14 @@ class GE2ELoss(nn.Module):
 class SILoss(nn.Module):
     def __init__(self, emb_size, num_of_spks):
         super(SILoss, self).__init__()
-        self.linear = nn.Linear(emb_size, num_of_spks)
+        #self.linear = nn.Linear(emb_size, num_of_spks, bias=False)
+        #self.relu = nn.ReLU(True)
 
     def forward(self, x, y):
         y = y.repeat_interleave(hp.train.M)
-        x = self.linear(x)
+        #x = self.linear(x)
         loss = F.cross_entropy(x, y)
-        return loss, x
+        return loss
 
 class HybridLoss(nn.Module):
     def __init__(self, emb_size, num_of_spks):
@@ -80,13 +81,13 @@ conv_block_input = 32
 def conv_block(input_dim, filters, strides):
     return nn.Sequential(
             nn.Conv2d(input_dim, filters[0], kernel_size=1, bias=False, stride=strides),
-            nn.BatchNorm2d(filters[0]),
+            nn.BatchNorm2d(filters[0]), #bn2
             nn.ReLU(True),
             nn.Conv2d(filters[0], filters[1], kernel_size=3, bias=False, padding=1),
-            nn.BatchNorm2d(filters[1]),
+            nn.BatchNorm2d(filters[1]), #bn3
             nn.ReLU(True),
             nn.Conv2d(filters[1], filters[2], kernel_size=1, bias=False),
-            nn.BatchNorm2d(filters[2])
+            nn.BatchNorm2d(filters[2]) #bn4
             )
 
     
@@ -115,6 +116,7 @@ class Resnet34_VLAD(nn.Module):
     def __init__(self):
         super(Resnet34_VLAD, self).__init__()
         self.conv1 = nn.Conv2d(input_dim, block1_input, kernel_size=7, bias=False, padding=3)
+        #print(sum(p.numel() for p in temp.parameters()))
         self.norm_layer = nn.BatchNorm2d(block1_input)
         self.relu = nn.ReLU(True)
         self.max_pool1 = nn.MaxPool2d((2, 2))
@@ -126,25 +128,39 @@ class Resnet34_VLAD(nn.Module):
         self.conv_block2 = conv_block(filters[0][2], filters[1],  (2, 2))
         self.shortcut2 = shortcut(filters[0][2], filters[1], (2, 2))
         self.identity_block2 = identity_block(filters[1][2], filters[1])
+        self.identity_block2_2 = identity_block(filters[1][2], filters[1])
         
         self.conv_block3 = conv_block(filters[1][2], filters[2],  (2, 2))
         self.shortcut3 = shortcut(filters[1][2], filters[2], (2, 2))
         self.identity_block3 = identity_block(filters[2][2], filters[2])
+        self.identity_block3_2 = identity_block(filters[2][2], filters[2])
         
         self.conv_block4 = conv_block(filters[2][2], filters[3],  (2, 2))
         self.shortcut4 = shortcut(filters[2][2], filters[3], (2, 2))
         self.identity_block4 = identity_block(filters[3][2], filters[3])
+        self.identity_block4_2 = identity_block(filters[3][2], filters[3])
         self.max_pool2 = nn.MaxPool2d((3, 1), stride=(2, 1))
         
         self.conv2 = nn.Conv2d(filters[3][2], filters[3][2], kernel_size=(7,1), bias=True)
         self.conv3 = nn.Conv2d(filters[3][2], hp.model.vlad_centers+hp.model.ghost_centers, kernel_size=(7,1), bias=True)
         
-        self.cluster = nn.Parameter(data=torch.Tensor(hp.model.vlad_centers+hp.model.ghost_centers, 512), requires_grad=True)
+        self.cluster = nn.Parameter(torch.randn(hp.model.vlad_centers+hp.model.ghost_centers, 512), requires_grad=True)
+        self._init_params()
         self.dense = nn.Linear(hp.model.vlad_centers*512, hp.model.proj)
         self.dropout = nn.Dropout(hp.model.dropout)
+        emb_size = 512
+        num_of_spks = 5994
+        self.predict = nn.Linear(emb_size, num_of_spks, bias=False)
         for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.Parameter):
-                nn.init.orthogonal_(m.weight)
+            if isinstance(m, nn.Conv2d):
+                nn.init.orthogonal_(m.weight, gain=nn.init.calculate_gain('relu'))
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+    def _init_params(self):
+        nn.init.orthogonal_(self.cluster.data)
         
     def forward(self, x):
         x = x.unsqueeze(1)
@@ -152,6 +168,7 @@ class Resnet34_VLAD(nn.Module):
         #            Block 1
         # ============================
         x1 = self.conv1(x)
+        #pdb.set_trace()
         x1 = self.norm_layer(x1)
         x1 = self.relu(x1)
         x1 = self.max_pool1(x1) #?
@@ -165,17 +182,18 @@ class Resnet34_VLAD(nn.Module):
         
         # ============================
         #            Block 3
-        # ============================             
+        # ============================       
         x3 = self.relu(self.conv_block2(x2).add(self.shortcut2(x2)))
         x3 = self.relu(self.identity_block2(x3).add(x3))
-        x3 = self.relu(self.identity_block2(x3).add(x3))
+        x3 = self.relu(self.identity_block2_2(x3).add(x3))
         
         # ============================
         #            Block 4
-        # ============================             
+        # ============================
+        #pdb.set_trace()
         x4 = self.relu(self.conv_block3(x3).add(self.shortcut3(x3)))
         x4 = self.relu(self.identity_block3(x4).add(x4)) 
-        x4 = self.relu(self.identity_block3(x4).add(x4)) 
+        x4 = self.relu(self.identity_block3_2(x4).add(x4)) 
 
         
         # ============================
@@ -183,7 +201,7 @@ class Resnet34_VLAD(nn.Module):
         # ============================             
         x5 = self.relu(self.conv_block4(x4).add(self.shortcut4(x4)))
         x5 = self.relu(self.identity_block4(x5).add(x5))
-        x5 = self.relu(self.identity_block4(x5).add(x5))
+        x5 = self.relu(self.identity_block4_2(x5).add(x5))
         x5 = self.max_pool2(x5)
         
         # ============================
@@ -218,12 +236,14 @@ class Resnet34_VLAD(nn.Module):
         cluster_l2 = nn.functional.normalize(cluster_res,dim=-1, p=2)
         x = cluster_l2.view(-1, hp.model.vlad_centers*512)
         
+        
+        
         # ============================
         #   Fully Connected Block 2
         # ============================  
         x = self.dense(x)
-        x = self.dropout(x)
+        x = self.relu(x)
         #unit vector normalization
         #x = x / torch.norm(x, dim=1).unsqueeze(1)
-
-        return x
+        pred = self.predict(x)
+        return x, pred

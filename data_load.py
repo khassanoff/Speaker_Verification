@@ -15,8 +15,7 @@ import torch
 from torch.utils.data import Dataset
 
 from hparam import hparam as hp
-from utils import load_feat
-
+from utils import load_data
 class VoxCeleb(Dataset):
     def __init__(self, shuffle=True, utter_start=0):
         
@@ -68,9 +67,12 @@ class VoxCeleb_utter(Dataset):
     def __init__(self, shuffle=True, utter_start=0):
         # data path
         self.path = os.path.join(hp.data.train_path, hp.data.feat_type)
-        #self.path2 = os.path.join(hp.data.train_path, 'spec_tel')
+        #self.path2 = os.path.join('./dataCNCeleb', 'spec')
         self.num_of_spk = len(os.listdir(self.path)) #+ len(os.listdir(self.path2)) 
+        #self.num_of_spk =len(os.listdir(self.path2)) 
         self.utt_list = glob.glob(self.path+'/*/*') #+ glob.glob(self.path2+'/*/*')
+        #self.utt_list =  glob.glob(self.path2+'/*/*')
+        
         self.utter_start = utter_start
         
     def __len__(self):
@@ -79,7 +81,7 @@ class VoxCeleb_utter(Dataset):
     def __getitem__(self, idx):
         selected_utt = self.utt_list[idx]
         spk_id = int(re.findall("(\d+)", os.path.basename(os.path.dirname(selected_utt)))[0])
-        utterance = load_feat(selected_utt)
+        utterance = load_data(selected_utt)
         utterance = np.array(utterance)
         utterance = np.expand_dims(utterance, axis=0)
         utterance = torch.tensor(np.transpose(utterance, axes=(0,2,1)))

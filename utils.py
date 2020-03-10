@@ -27,7 +27,7 @@ def step_decay(epoch, optimizer):
     stage6 = hp.train.epochs
 
     if hp.train.warmup_epochs>0:
-        milestone = [1, stage1, stage2, stage3, stage4, stage5, stage6]
+        milestone = [hp.train.warmup_epochs, stage1, stage2, stage3, stage4, stage5, stage6]
         gamma = [0.1, 1.0, 0.1, 0.01, 1.0, 0.1, 0.01]
     else:
         milestone = [stage1, stage2, stage3, stage4, stage5, stage6]
@@ -94,7 +94,20 @@ def normalize_0_1(values, max_value, min_value):
     normalized = np.clip((values - min_value) / (max_value - min_value), 0, 1)
     return normalized
 
+def load_data(path, win_length=400, sr=16000, hop_length=160, n_fft=512, spec_len=250, mode='train'):
+    mag_T = np.load(path)
+    freq, time = mag_T.shape
+    if mode == 'train':
+        randtime = np.random.randint(0, time-spec_len)
+        spec_mag = mag_T[:, randtime:randtime+spec_len]
+    else:
+        spec_mag = mag_T
+    # preprocessing, subtract mean, divided by time-wise var
+    mu = np.mean(spec_mag, 0, keepdims=True)
+    std = np.std(spec_mag, 0, keepdims=True)
+    return (spec_mag - mu) / (std + 1e-5)
 
+'''
 def load_feat(np_file, mode = 'train'):
     spec = np.load(np_file)
     if mode.lower() == 'train':
@@ -103,9 +116,9 @@ def load_feat(np_file, mode = 'train'):
             spec = np.concatenate((spec, spec), axis=1)
         # randomly select portion of a utterance of size tisv_frame, e.g. 250 frames
         randtime = np.random.randint(0, spec.shape[1]-hp.data.tisv_frame)
-        spec = spec[:, randtime:randtime+hp.data.tisv_frame]
-
+        spec = spec[:, randtime:randtime+hp.data.tisv_frame
     return spec
+'''                    
 
 def cheby_bandpass_filter(data, lowcut, highcut, fs, order=5):
     b, a = cheby2(order, 20, [lowcut, highcut], btype='bandpass', fs=fs)

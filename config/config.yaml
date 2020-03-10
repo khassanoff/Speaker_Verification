@@ -1,5 +1,5 @@
 training: !!bool "true"
-device: 12, 13 #gpu id
+device: 9 #gpu id
 seed: 777
 ---
 data:
@@ -27,7 +27,7 @@ model:
     vlad_centers: 8
     dropout: 0.0
     #Model path for testing, inference, or resuming training
-    model_path: 'modelTResNet34_proj512_vlad10_ghost0_spk256_utt1_dropout0.0_featspec_lr0.001_optimAdam_losssi_wd0.0001_fr400_patience10_thrsh0.0001_factor0.5.pth'
+    model_path: 'voxx_modelTResNet34_proj512_vlad10_ghost2_spk160_utt1_dropout0.0_featspec_lr0.001_optimAdam_losssi_wd0.0001_fr250_patience50_thrsh0.0001_factor0.5.pth'
 ---
 train:
     N: 160 #Number of speakers in batch
@@ -44,5 +44,5 @@ train:
     factor: 0.5
     log_interval: 100 #Iterations before printing progress
     test_interval: 10 #test on sp. verification after test_interval epochs
-    checkpoint_dir: './speech_id_checkpoint'
+    checkpoint_dir: './baseline_1'
     restore: !!bool "false" #Resume training from previous model path
