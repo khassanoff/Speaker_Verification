@@ -18,8 +18,9 @@ from tqdm import tqdm as tqdm
 from hparam import hparam as hp
 from data_load import VoxCeleb, VoxCeleb_utter
 #from speech_embedder_net import SpeechEmbedder, GE2ELoss, get_centroids, get_cossim
-from speech_embedder_net import Resnet34_VLAD, SpeechEmbedder, GE2ELoss, SILoss, get_centroids, \
-get_cossim, HybridLoss
+#from speech_embedder_net import Resnet34_VLAD, SpeechEmbedder, GE2ELoss, SILoss, get_centroids, \
+#get_cossim, HybridLoss
+from speech_embedder2 import SpeakerRecognition, SILoss
 
 torch.manual_seed(hp.seed)
 np.random.seed(hp.seed)
@@ -41,70 +42,29 @@ def train(model_path):
     log_file_path = os.path.join(hp.train.checkpoint_dir, log_file)
     
     #load model
-    if hp.model.type.lower() == 'tresnet34':
-        embedder_net = Resnet34_VLAD()
-    elif hp.model.type.lower() == 'rnn':
-        embedder_net = SpeechEmbedder()
-
-    if torch.cuda.device_count() > 1:
-        embedder_net = torch.nn.DataParallel(embedder_net)
-    embedder_net = embedder_net.cuda()
+    embedder_net = SpeakerRecognition(512, 5994, use_attention=False)
+    embedder_net = torch.nn.DataParallel(embedder_net).cuda()
     print(embedder_net)
 
-    if hp.train.loss.lower() == 'ge2e':
-        #dataset
-        train_dataset = VoxCeleb()
-        train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
-                                  num_workers=hp.train.num_workers, drop_last=True)
-        loss_fn = GE2ELoss().cuda()
-    elif hp.train.loss.lower() == 'si':
-        #dataset
-        train_dataset = VoxCeleb_utter()
-        train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
-                                  num_workers=hp.train.num_workers, drop_last=True)
-        loss_fn = SILoss(hp.model.proj, train_dataset.num_of_spk).cuda()
-    elif hp.train.loss.lower() == 'hybrid':
-        #dataset
-        train_dataset = VoxCeleb()
-        train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
-                                  num_workers=hp.train.num_workers, drop_last=True)
-        loss_fn = HybridLoss(hp.model.proj, len(train_dataset)).cuda()
-
+    train_dataset = VoxCeleb_utter()
+    train_loader = DataLoader(train_dataset, batch_size=hp.train.N, shuffle=True,
+                              num_workers=hp.train.num_workers, drop_last=True)
+    loss_fn = SILoss().cuda()
         
     if hp.train.restore:
         embedder_net.load_state_dict(torch.load(os.path.join(hp.train.checkpoint_dir, model_path)))
-        loss_fn.load_state_dict(torch.load(os.path.join(hp.train.checkpoint_dir, "loss_" + model_path)))
 
-    #Both net and loss have trainable parameters
-
-    if hp.train.optim.lower() == 'sgd':
-        optimizer = torch.optim.SGD([
-                    {'params': embedder_net.parameters()},
-                    {'params': loss_fn.parameters()}
-                ], lr=hp.train.lr, weight_decay=hp.train.wd)
-    elif hp.train.optim.lower() == 'adam':
-        optimizer = torch.optim.Adam([
-                    {'params': embedder_net.parameters()},
-                    {'params': loss_fn.parameters()}
-                ], lr=hp.train.lr, weight_decay=hp.train.wd)
-    elif hp.train.optim.lower() == 'adadelta':
-        optimizer = torch.optim.Adadelta([
-                    {'params': embedder_net.parameters()},
-                    {'params': loss_fn.parameters()}
-                ], lr=hp.train.lr, weight_decay=hp.train.wd)
+    optimizer = torch.optim.Adam([
+                {'params': embedder_net.parameters()},
+                {'params': loss_fn.parameters()}
+            ], lr=hp.train.lr, weight_decay=hp.train.wd)
         
     print(optimizer)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', verbose=True,
-                    factor=hp.train.factor, patience=hp.train.patience, threshold=hp.train.threshold)
-    #scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=hp.train.lr*0.01,
-    #                cycle_momentum=False, max_lr=hp.train.lr, step_size_up=5*len(train_loader),
-    #                mode="triangular")
-    print(scheduler)
     
     iteration = 0
-    best_dev_acc = 0
+    eer_low = 100
     for e in range(hp.train.epochs):
-        #step_decay(e, optimizer)       #stage based lr scheduler
+        step_decay(e, optimizer)       #stage based lr scheduler
         total_loss = 0
         for batch_id, (mel_db_batch, spk_id) in enumerate(train_loader):
             embedder_net.train()
@@ -114,16 +74,12 @@ def train(model_path):
             mel_db_batch = torch.reshape(mel_db_batch, (hp.train.N*hp.train.M, mel_db_batch.size(2),
                                                         mel_db_batch.size(3)))
             optimizer.zero_grad()
-            embeddings = embedder_net(mel_db_batch)
-            #embeddings = torch.reshape(embeddings, (hp.train.N, hp.train.M, embeddings.size(1)))
+            embeddings, logit = embedder_net(mel_db_batch)
             #get loss, call backward, step optimizer
-            loss, _ = loss_fn(embeddings, spk_id) #wants (Speaker, Utterances, embedding)
+            loss = loss_fn(logit, spk_id) #wants (Speaker, Utterances, embedding)
             loss.backward()
             optimizer.step()
-            #scheduler.step()    #uncomment for iteration based schedulers, eg. CycliclLR
-            #print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
-
-            total_loss = total_loss + loss
+            total_loss += loss
             iteration += 1
             if (batch_id + 1) % hp.train.log_interval == 0 or \
                (batch_id + 1) % (len(train_dataset)//hp.train.N) == 0:
@@ -135,14 +91,12 @@ def train(model_path):
                     f.write(mesg)
                     
                 if (batch_id + 1) % (len(train_dataset)//hp.train.N) == 0:
-                    #scheduler.step(total_loss) # uncommenr for ReduceLROnPlateau scheduler
                     print("learning rate: {0:.6f}\n".format(optimizer.param_groups[1]['lr']))
         
       
         # switch model to evaluation mode
         embedder_net.eval()
         # calculate accuracy on validation set
-        eer_low = 100
         with torch.no_grad():
             verify_list = np.loadtxt(hp.data.test_meta_path, str)
             list1 = np.array([i[1] for i in verify_list])
@@ -154,7 +108,7 @@ def train(model_path):
             for index, wav_file in enumerate(unique_list[0]):
                 spec = np.load(os.path.join(hp.data.test_path, wav_file.strip('.wav') +'.npy'), allow_pickle=True)
                 s1 = torch.Tensor(spec).unsqueeze(0)
-                e1 = embedder_net(s1.cuda())
+                e1, _ = embedder_net(s1.cuda())
                 vectors[wav_file] = e1.cpu().detach()
         
             scores, labels = [], []
@@ -176,7 +130,6 @@ def train(model_path):
                 ckpt_loss_path = os.path.join(hp.train.checkpoint_dir, 'loss_'+ckpt_model_filename)
                 torch.save(loss_fn.state_dict(), ckpt_loss_path)
                 torch.save(embedder_net.state_dict(), ckpt_model_path)
-        scheduler.step(eer) # uncommenr for ReduceLROnPlateau scheduler
         mesg = ("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
         mesg += ("learning rate: {0:.8f}\n".format(optimizer.param_groups[1]['lr']))
         print(mesg)
@@ -191,7 +144,7 @@ def testVoxCelebOptim(model_path):
     #Load model
     print('==> loading model({})'.format(model_path))
     if hp.model.type.lower() == 'tresnet34':
-        embedder_net = Resnet34_VLAD()
+        embedder_net = SpeakerRecognition(512, 5994, use_attention=False)
     elif hp.model.type.lower() == 'rnn':
         embedder_net = SpeechEmbedder()
     embedder_net = torch.nn.DataParallel(embedder_net)
@@ -213,7 +166,7 @@ def testVoxCelebOptim(model_path):
         spec = np.load(os.path.join(hp.data.test_path, hp.data.feat_type, 'test_triplet'+str(original_index)+'.npy'), allow_pickle=True)[1]
         s1 = torch.Tensor(spec).unsqueeze(0)
         #pdb.set_trace()
-        e1 = embedder_net(s1.cuda())
+        e1, _ = embedder_net(s1.cuda())
         vectors[wav_file] = e1.cpu().detach()
         
     scores, labels = [], []
@@ -234,7 +187,7 @@ def testVoxCelebOptim(model_path):
 def testJusanBank(p1, p2, model_path):
     model_path = os.path.join(hp.train.checkpoint_dir, model_path)
 
-    embedder_net = Resnet34_VLAD()
+    embedder_net = SpeakerRecognition(512, 5994, use_attention=False)
     embedder_net = torch.nn.DataParallel(embedder_net)
     embedder_net = embedder_net.cuda()
     embedder_net.load_state_dict(torch.load(model_path))
@@ -245,13 +198,13 @@ def testJusanBank(p1, p2, model_path):
     s1 = torch.Tensor(s1).unsqueeze(0)
     s2 = torch.Tensor(s2).unsqueeze(0)
     print('==> computing vectors')
-    e1 = embedder_net(s1.cuda())
-    e2 = embedder_net(s2.cuda())
+    e1, _ = embedder_net(s1.cuda())
+    e2, _ = embedder_net(s2.cuda())
     e1 = e1 / torch.norm(e1, dim=1).unsqueeze(1)
     e2 = e2 / torch.norm(e2, dim=1).unsqueeze(1)
     score = torch.dot(e1.squeeze(0), e2.squeeze(0)).item()
     print(score)
-    return score
+    #return score
     #print('==> computing eer')
     #eer, thresh = calculate_eer(labels, np.array([score]))
     #print("\nEER : %0.4f (thres:%0.2f)\n"%(eer, thresh))
